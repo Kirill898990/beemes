@@ -25,18 +25,19 @@
 
 ## Сервер
 
-Нужен свой сервер (VDS) с Ubuntu 24.04 и домен `beemes.ru`. В DNS домена добавьте две A-записи
-с IP-адресом сервера: `@` (сам beemes.ru) и `www`. Затем на сервере под root:
+Нужен свой сервер (VDS) с Ubuntu 24.04 и свой домен. Сейчас beemes работает на `kbast.ru`
+(позже переедет на `beemes.ru`). В DNS домена добавьте две A-записи с IP-адресом сервера:
+`@` (сам домен) и `www`. Затем на сервере под root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main/server/install.sh \
-  | bash -s -- beemes.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
+  | bash -s -- kbast.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
 ```
 
 Что произойдёт:
 
 1. beemes запустится в `/opt/beemes` на `127.0.0.1:8091` (служба `beemes`).
-2. Поставится **Caddy**: он получает сертификаты https для `beemes.ru` и `www.beemes.ru`.
+2. Поставится **Caddy**: он получает сертификаты https для домена и `www.` перед ним.
 3. Поставится TURN-сервер для звонков (coturn) — через него идут звонки, когда телефоны не могут
    соединиться напрямую.
 
@@ -53,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main
 2. Скачать `google-services.json` и положить в `android/app/` (в Git его нет). Без него приложение тоже
    собирается и работает, просто без уведомлений.
 3. Настройки проекта → Сервисные аккаунты → «Создать закрытый ключ». Открыть панель администратора
-   `https://beemes.ru/_/` → коллекция `bm_settings` → новая запись → вставить содержимое
+   `https://kbast.ru/_/` → коллекция `bm_settings` → новая запись → вставить содержимое
    скачанного JSON в поле `firebaseKey`. Ключ никому не пересылайте и не кладите в Git.
 
 ### Новая версия приложения на сайте
@@ -65,7 +66,18 @@ curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main
 
 Открыть папку `android/` в Android Studio. Подписанный APK: Build → Generate Signed App Bundle or APK.
 Для проверки со своим компьютером: в `android/local.properties` строка `server.url=http://10.0.2.2:8091`
-(эмулятор) — debug-сборка будет ходить на него, release всегда ходит на `https://beemes.ru`.
+(эмулятор) — debug-сборка будет ходить на него, release всегда ходит на `https://kbast.ru`.
+
+### Переезд на другой домен (например, с kbast.ru на beemes.ru)
+
+1. В DNS нового домена — A-записи `@` и `www` с IP сервера.
+2. На сервере — та же команда установки с новым доменом, а старый указать в `ALSO_DOMAINS`, чтобы старые
+   версии приложения продолжали работать. База и переписка не трогаются:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main/server/install.sh \
+     | ALSO_DOMAINS="kbast.ru" bash -s -- beemes.ru
+   ```
+3. В `android/app/build.gradle.kts` поменять `releaseServerUrl`, поднять `versionCode` и выпустить новую версию.
 
 Проверка шифрования (совпадение с эталонными значениями):
 

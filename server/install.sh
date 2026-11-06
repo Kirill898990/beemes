@@ -36,6 +36,9 @@ SCHOOL_INSTALL_URL="${SCHOOL_INSTALL_URL:-https://raw.githubusercontent.com/${SC
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 CADDY_DIR="${CADDY_DIR:-/etc/caddy}"
 TURN_CONF="${TURN_CONF:-/etc/turnserver.conf}"
+# Дополнительные домены, на которых beemes тоже открывается (например, старый адрес при переезде):
+#   ALSO_DOMAINS="kbast.ru" bash -s -- beemes.ru …
+ALSO_DOMAINS="${ALSO_DOMAINS:-}"
 
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[1;31mОшибка: %s\033[0m\n' "$1" >&2; exit 1; }
@@ -245,19 +248,27 @@ $CADDY_EMAIL
 
 import $CADDY_DIR/sites/*.caddy
 EOF
+# Основной домен и дополнительные (ALSO_DOMAINS), для каждого вида beemes.ru — ещё www.
+SITE_DOMAINS="$DOMAIN"
+WWW_DOMAINS=""
+for d in $DOMAIN $(for a in $ALSO_DOMAINS; do idn2 "$a"; done); do
+  d="${d#www.}"
+  [ "$d" = "$DOMAIN" ] || SITE_DOMAINS="$SITE_DOMAINS, $d"
+  if [ "$(printf '%s' "$d" | tr -cd '.' | wc -c)" = 1 ]; then WWW_DOMAINS="${WWW_DOMAINS:+$WWW_DOMAINS, }www.$d"; fi
+done
 cat > "$CADDY_DIR/sites/beemes.caddy" <<EOF
 # Мессенджер beemes (создано install.sh). PocketBase работает на 127.0.0.1:$PORT.
-$DOMAIN {
+$SITE_DOMAINS {
 	@compress not path /api/realtime
 	encode @compress zstd gzip
 	reverse_proxy 127.0.0.1:$PORT
 }
 EOF
-# Домен вида beemes.ru: www.beemes.ru тоже открывается и ведёт на основной адрес.
-if [ "$(printf '%s' "$DOMAIN" | tr -cd '.' | wc -c)" = 1 ]; then
+# www.beemes.ru тоже открывается и ведёт на основной адрес.
+if [ -n "$WWW_DOMAINS" ]; then
   cat >> "$CADDY_DIR/sites/beemes.caddy" <<EOF
 
-www.$DOMAIN {
+$WWW_DOMAINS {
 	redir https://$DOMAIN{uri} permanent
 }
 EOF
