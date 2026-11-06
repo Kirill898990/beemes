@@ -29,7 +29,8 @@ export function menu(root, { go, route }) {
       h("a", { href: "#/settings/profile", class: "me-card" + active("profile") }, avatar(me, 60), h("span", {}, nameWithStatus(me, 22), h("small", {}, "@" + me.username)), icon("edit")),
       h("h3", {}, "Оформление"), h("div", { class: "card pad" }, themeSeg),
       h("h3", {}, "Уведомления"),
-      h("div", { class: "card" }, h("label", { class: "row-item" }, icon("bell"), h("span", {}, h("b", {}, "Уведомления о сообщениях"), h("small", {}, "Когда окно beemes не на экране")), notifyBtn)),
+      h("div", { class: "card" }, h("label", { class: "row-item" }, icon("bell"), h("span", {}, h("b", {}, "Уведомления о сообщениях"), h("small", {}, "Когда окно beemes не на экране")), notifyBtn),
+        row("phone", "Проверить уведомления на телефоне", "Пришлём пробное уведомление и скажем, если что-то не так", pushTest)),
       h("h3", {}, "Безопасность"),
       h("div", { class: "card" },
         row("key", "Сменить пароль", "Ключ шифрования перешифруется новым паролем", () => go("#/settings/password"), active("password")),
@@ -41,6 +42,40 @@ export function menu(root, { go, route }) {
         row("logout", "Выйти", null, confirmLogout, "danger"),
         row("delete_forever", "Удалить аккаунт", "Профиль, ключи и все чаты — навсегда", () => deleteAccount(me), "danger"))));
   return () => disposeEmoji(root);
+}
+
+const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many);
+
+/** Что значит ответ Google — человеческими словами. */
+function explain(err) {
+  if (/SENDER_ID_MISMATCH/.test(err)) return "Файл google-services.json в приложении из другого проекта Firebase, чем ключ на сервере. Возьмите оба файла из одного проекта.";
+  if (/UNREGISTERED|NOT_FOUND|404/.test(err)) return "Телефон больше не зарегистрирован (приложение удалено или переустановлено). Откройте beemes на телефоне — он зарегистрируется заново.";
+  if (/THIRD_PARTY_AUTH_ERROR|PERMISSION_DENIED|403/.test(err)) return "Google не разрешает отправку: в Firebase у проекта должен быть включён Cloud Messaging API.";
+  if (/^login/.test(err)) return "Google не принял ключ Firebase. Создайте новый закрытый ключ в Firebase и вставьте его заново в bm_settings.";
+  if (/^network/.test(err)) return "Сервер не смог связаться с Google. Попробуйте ещё раз через минуту.";
+  return "Google ответил ошибкой: " + err;
+}
+
+async function pushTest() {
+  const box = h("div", { class: "push-test" }, h("p", { class: "muted" }, "Отправляем пробное уведомление…"));
+  const dlg = modal("Проверка уведомлений", box, [{ label: "Закрыть" }]);
+  let r;
+  try { r = await store.pushTest(); } catch (e) { box.replaceChildren(h("p", { class: "form-error" }, e.message)); return; }
+  const line = (good, text) => h("p", { class: good ? "ok-line" : "bad-line" }, good ? "✓ " : "✗ ", text);
+  const out = [];
+  if (r.key === "missing") out.push(line(false, "На сервере не вставлен ключ Firebase (панель администратора → bm_settings → firebaseKey)."));
+  else if (r.key === "invalid") out.push(line(false, "Ключ Firebase на сервере вставлен не полностью — скопируйте файл ключа целиком."));
+  else out.push(line(true, `Ключ Firebase на месте (проект ${r.project}).`));
+  if (r.key === "ok") {
+    if (!r.devices) out.push(line(false, "Ни одного телефона: установите приложение beemes (версия с уведомлениями), войдите и разрешите уведомления — телефон зарегистрируется сам."));
+    else out.push(line(true, `${r.devices} ${plural(r.devices, "телефон зарегистрирован", "телефона зарегистрированы", "телефонов зарегистрировано")}.`));
+  }
+  if (r.devices && r.key === "ok") out.push(line(r.login, r.login ? "Google принял ключ." : "Google не принял ключ."));
+  if (r.sent) out.push(line(true, `Google доставил пробное уведомление: ${r.sent} из ${r.devices}. Посмотрите на телефон — «Уведомления работают 🐝».`));
+  (r.errors || []).forEach((e) => out.push(line(false, explain(e))));
+  if (r.sent) out.push(h("p", { class: "muted small" }, "Не видно уведомления на телефоне? Проверьте, что уведомления beemes разрешены в настройках телефона. В версии приложения 1.1 пробное уведомление не показывается — напишите себе с другого аккаунта."));
+  box.replaceChildren(...out);
+  return dlg;
 }
 
 function confirmLogout() {

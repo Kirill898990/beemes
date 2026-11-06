@@ -82,6 +82,24 @@ object Notifier {
         try { m.notify(id, n) } catch (_: SecurityException) {}
     }
 
+    /** Пробное уведомление: «Уведомления работают». */
+    fun test(context: Context) {
+        if (!allowed(context)) return
+        val open = PendingIntent.getActivity(
+            context, 7, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CH_MESSAGES)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(HONEY)
+            .setContentTitle("Уведомления работают 🐝")
+            .setContentText("Так будут приходить новые сообщения и звонки.")
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        try { NotificationManagerCompat.from(context).notify(7, n) } catch (_: SecurityException) {}
+    }
+
     fun clearChat(context: Context, chatId: String) = NotificationManagerCompat.from(context).cancel(chatId.hashCode())
 
     /** Входящий звонок: на весь экран (на заблокированном телефоне тоже), с кнопками «Ответить» и «Отклонить». */

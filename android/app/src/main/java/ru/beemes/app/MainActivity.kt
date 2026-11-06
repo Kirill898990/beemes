@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        openChat.value = intent.getStringExtra(Notifier.EXTRA_CHAT)
+        openChat.value = intent.getStringExtra(Notifier.EXTRA_CHAT)?.takeIf { it.isNotBlank() }
         setContent {
             var theme by androidx.compose.runtime.remember { mutableStateOf(app.repository.theme) }
             val dark = when (theme) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra(Notifier.EXTRA_CHAT)?.let { openChat.value = it }
+        intent.getStringExtra(Notifier.EXTRA_CHAT)?.takeIf { it.isNotBlank() }?.let { openChat.value = it }
     }
 
     /** Чат, который нужно открыть (нажали на уведомление). */

@@ -59,6 +59,14 @@ routerAdd("GET", "/api/bm/username/{name}", (e) => {
 })
 
 // Приложение открыто — человек «в сети». Телефон присылает раз в минуту.
+// Кнопка «Проверить уведомления»: пробное уведомление на все мои телефоны и отчёт, что получилось.
+routerAdd("POST", "/api/bm/push-test", (e) => {
+  const { pushToUser } = require(`${__hooks}/fcm_lib.js`)
+  const report = {}
+  pushToUser(e.app, e.auth.id, { type: "test" }, true, 600, report)
+  return e.json(200, report)
+}, $apis.requireAuth("users"))
+
 routerAdd("POST", "/api/bm/online", (e) => {
   const { iso } = require(`${__hooks}/lib.js`)
   e.app.db().newQuery("UPDATE users SET lastSeen = {:t} WHERE id = {:id}").bind({ t: iso(Date.now()), id: e.auth.id }).execute()

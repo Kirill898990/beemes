@@ -51,6 +51,8 @@ class PushService : FirebaseMessagingService() {
                     Notifier.incomingCall(this, callId, d["chat"].orEmpty(), d["from"].orEmpty(), d["name"].orEmpty(), d["video"] == "1")
                 }
             }
+            // Кнопка «Проверить уведомления» в настройках веб-версии.
+            "test" -> Notifier.test(this)
             "call_end" -> {
                 val callId = d["call"].orEmpty()
                 Notifier.cancelCall(this, callId)

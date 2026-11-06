@@ -223,6 +223,9 @@ export async function deleteAccount() {
   await logout();
 }
 
+/** Пробное уведомление на мои телефоны → отчёт сервера. */
+export const pushTest = () => post("api/bm/push-test");
+
 export const ping = () => (state.me ? post("api/bm/online").catch(() => {}) : Promise.resolve());
 
 // ---------- Чаты ----------

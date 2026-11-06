@@ -71,20 +71,31 @@ function accessToken(app, key, tokenUrl) {
 /**
  * Отправить уведомление на все телефоны человека. data — только строки (так требует FCM).
  * urgent — для звонков: доставить сразу, даже если телефон спит. ttl — сколько секунд уведомление ещё актуально.
+ * report — необязательный объект: в него записывается, что получилось (для кнопки «Проверить уведомления»).
  * → сколько телефонов получили уведомление.
  */
-function pushToUser(app, userId, data, urgent, ttl) {
+function pushToUser(app, userId, data, urgent, ttl, report) {
+  const r = report || {}
+  r.key = "missing"; r.devices = 0; r.login = false; r.sent = 0; r.errors = []
   const s = settings(app)
   if (!s) return 0
   let key = null
   try { key = JSON.parse(s.getString("firebaseKey") || "null") } catch (_) {}
-  if (!key || !key.private_key || !key.client_email || !key.project_id) return 0
+  if (!key) return 0
+  if (!key.private_key || !key.client_email || !key.project_id) { r.key = "invalid"; return 0 }
+  r.key = "ok"
+  r.project = key.project_id
   const devices = app.findRecordsByFilter("devices", "user = {:u}", "-updated", 10, 0, { u: userId })
+  r.devices = devices.length
   if (!devices.length) return 0
   const tokenUrl = s.getString("tokenUrl") || key.token_uri || "https://oauth2.googleapis.com/token"
   let access = ""
-  try { access = accessToken(app, key, tokenUrl) } catch (err) { app.logger().warn("Firebase: ошибка входа", "error", String(err)) }
-  if (!access) return 0
+  try { access = accessToken(app, key, tokenUrl) } catch (err) {
+    app.logger().warn("Firebase: ошибка входа", "error", String(err))
+    r.errors.push("login: " + String(err).slice(0, 200))
+  }
+  if (!access) { if (!r.errors.length) r.errors.push("login: Google не принял ключ"); return 0 }
+  r.login = true
   const base = (s.getString("fcmUrl") || "https://fcm.googleapis.com").replace(/\/+$/, "")
   const strData = {}
   Object.keys(data).forEach((k) => { if (data[k] != null) strData[k] = String(data[k]) })
@@ -104,14 +115,22 @@ function pushToUser(app, userId, data, urgent, ttl) {
         }),
         timeout: 10,
       })
+      const body = toString(res.body)
       if (res.statusCode === 200) sent++
-      // Телефон удалил приложение или вышел из аккаунта — больше туда не шлём.
-      else if (res.statusCode === 404 || (res.statusCode === 400 && /UNREGISTERED|INVALID_ARGUMENT/.test(toString(res.body)))) app.delete(d)
-      else if (res.statusCode === 401) app.store().remove("fcm_access")
+      else {
+        const m = /"status"\s*:\s*"([A-Z_]+)"/.exec(body) || /"errorCode"\s*:\s*"([A-Z_]+)"/.exec(body)
+        r.errors.push(res.statusCode + (m ? " " + m[1] : "") + ": " + body.slice(0, 160))
+        app.logger().warn("Firebase: не доставлено", "status", res.statusCode, "body", body.slice(0, 300))
+        // Телефон удалил приложение или вышел из аккаунта — больше туда не шлём.
+        if (res.statusCode === 404 || (res.statusCode === 400 && /UNREGISTERED|INVALID_ARGUMENT/.test(body))) app.delete(d)
+        else if (res.statusCode === 401) app.store().remove("fcm_access")
+      }
     } catch (err) {
       app.logger().warn("Firebase: не отправилось", "error", String(err))
+      r.errors.push("network: " + String(err).slice(0, 160))
     }
   })
+  r.sent = sent
   return sent
 }
 
