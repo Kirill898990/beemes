@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -359,9 +360,10 @@ fun MyProfileScreen(repo: Repository, onBack: () -> Unit) {
 @Composable
 fun SettingsScreen(
     repo: Repository, theme: String, onTheme: (String) -> Unit, onBack: () -> Unit,
-    onProfile: () -> Unit, onPassword: () -> Unit, onBlocked: () -> Unit, onAbout: () -> Unit,
+    onProfile: () -> Unit, onPassword: () -> Unit, onBlocked: () -> Unit, onAbout: () -> Unit, onSchool: () -> Unit = {},
 ) {
     val me by repo.me.collectAsState()
+    val student by repo.school.student.collectAsState()
     val context = LocalContext.current
     var notifications by remember { mutableStateOf(repo.notificationsEnabled) }
     var confirmLogout by remember { mutableStateOf(false) }
@@ -398,6 +400,13 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+            Section("Учёба") {
+                RowItem(
+                    Icons.Filled.School, "Простая химия",
+                    student?.let { "${it.name.ifBlank { it.username }} · оценки за работы" } ?: "Подключить учебный профиль и видеть оценки",
+                    onClick = onSchool,
+                )
             }
             Section("Уведомления") {
                 RowItem(Icons.Filled.Notifications, "Уведомления о сообщениях", "Звонки приходят всегда", trailing = {

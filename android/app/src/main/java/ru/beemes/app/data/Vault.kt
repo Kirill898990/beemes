@@ -43,6 +43,8 @@ class Vault(context: Context) {
         }.getOrNull()
     }
 
+    fun remove(name: String) = prefs.edit().remove(name).apply()
+
     fun clear() = prefs.edit().clear().apply()
 
     private fun key(): SecretKey {

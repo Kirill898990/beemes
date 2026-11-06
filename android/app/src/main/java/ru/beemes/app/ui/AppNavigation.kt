@@ -34,6 +34,7 @@ import ru.beemes.app.ui.profile.PasswordScreen
 import ru.beemes.app.ui.profile.PeerProfileScreen
 import ru.beemes.app.ui.profile.SafetyCodeScreen
 import ru.beemes.app.ui.profile.SettingsScreen
+import ru.beemes.app.ui.school.SchoolScreen
 
 private const val SLIDE = 260
 
@@ -162,11 +163,13 @@ private fun MainFlow(app: BeemesApp, openChat: MutableStateFlow<String?>, onThem
                 onPassword = { nav.navigate("password") },
                 onBlocked = { nav.navigate("blocked") },
                 onAbout = { nav.navigate("about") },
+                onSchool = { nav.navigate("school") },
             )
         }
         composable("me") { MyProfileScreen(repo, onBack = { nav.back() }) }
         composable("password") { PasswordScreen(repo, onBack = { nav.back() }) }
         composable("blocked") { BlockedScreen(repo, onBack = { nav.back() }) }
         composable("about") { AboutScreen(repo, onBack = { nav.back() }) }
+        composable("school") { SchoolScreen(repo, onBack = { nav.back() }) }
     }
 }

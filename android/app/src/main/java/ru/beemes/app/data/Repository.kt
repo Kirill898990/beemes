@@ -28,6 +28,8 @@ import java.util.concurrent.ConcurrentHashMap
 class Repository(private val context: Context) {
     private val prefs = context.getSharedPreferences("session", Context.MODE_PRIVATE)
     private val vault = Vault(context)
+    /** Учебный профиль «Простой химии» (оценки). */
+    val school = School(context, vault)
     private var token: String? = prefs.getString("token", null)
     val api = Api(BuildConfig.SERVER_URL) { token }
     private val json get() = api.json
@@ -111,6 +113,7 @@ class Repository(private val context: Context) {
 
     fun logout() {
         realtime.stop()
+        school.disconnect()
         token = null
         privateKey = null
         vault.clear()

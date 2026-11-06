@@ -18,6 +18,9 @@ val localProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 val debugServerUrl = localProperties.getProperty("server.url") ?: releaseServerUrl
+// Сайт «Простая химия» — для учебного профиля с оценками (для проверки: school.url в local.properties).
+val releaseSchoolUrl = "https://xn--h1aaafbiaikhnfkx.xn--p1ai"
+val debugSchoolUrl = localProperties.getProperty("school.url") ?: releaseSchoolUrl
 
 // Подпись release-сборки — из keystore.properties (его нет в Git).
 val keystoreFile = rootProject.file("keystore.properties")
@@ -52,9 +55,11 @@ android {
     buildTypes {
         debug {
             buildConfigField("String", "SERVER_URL", "\"$debugServerUrl\"")
+            buildConfigField("String", "SCHOOL_URL", "\"$debugSchoolUrl\"")
         }
         release {
             buildConfigField("String", "SERVER_URL", "\"$releaseServerUrl\"")
+            buildConfigField("String", "SCHOOL_URL", "\"$releaseSchoolUrl\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
