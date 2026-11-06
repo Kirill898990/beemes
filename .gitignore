@@ -1,0 +1,9 @@
+# База сервера и секреты — не в Git
+server/pb_data/
+server/server.env
+*.jks
+*.keystore
+keystore.properties
+google-services.json
+.DS_Store
+__pycache__/

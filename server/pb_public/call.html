@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Звонок · beemes</title>
+  <meta name="theme-color" content="#15121F">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'">
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+  <link rel="stylesheet" href="css/call.css">
+</head>
+<body>
+  <main class="call" id="call">
+    <div class="call-comb" aria-hidden="true"></div>
+    <video id="remote" class="call-remote" autoplay playsinline></video>
+    <video id="local" class="call-local" autoplay playsinline muted hidden></video>
+
+    <div class="call-top">
+      <div class="call-avatar" id="avatar" aria-hidden="true"><span id="initial">?</span></div>
+      <h1 class="call-name" id="name">Звонок</h1>
+      <p class="call-status" id="status" role="status" aria-live="polite">Готовимся…</p>
+      <p class="call-lock" id="lock" hidden>🔒 Разговор зашифрован</p>
+      <div class="call-meters" id="meters" hidden aria-hidden="true">
+        <span class="call-meter" id="meter-me">Вы <i></i><i></i><i></i><i></i><i></i></span>
+        <span class="call-meter" id="meter-them">Собеседник <i></i><i></i><i></i><i></i><i></i></span>
+      </div>
+      <p class="call-hint" id="sound-hint" role="status" aria-live="polite"></p>
+    </div>
+
+    <div class="call-bar" id="bar">
+      <button type="button" class="call-btn" id="mic" aria-pressed="false" aria-label="Выключить микрофон" title="Микрофон">
+        <span class="call-ico" aria-hidden="true">🎙️</span><span class="call-label">Микрофон</span>
+      </button>
+      <button type="button" class="call-btn" id="cam" aria-pressed="false" aria-label="Выключить камеру" title="Камера" hidden>
+        <span class="call-ico" aria-hidden="true">📷</span><span class="call-label">Камера</span>
+      </button>
+      <button type="button" class="call-btn" id="speaker" aria-pressed="false" aria-label="Громкая связь" title="Громкая связь" hidden>
+        <span class="call-ico" aria-hidden="true">🔊</span><span class="call-label">Динамик</span>
+      </button>
+      <button type="button" class="call-btn" id="flip" aria-label="Другая камера" title="Другая камера" hidden>
+        <span class="call-ico" aria-hidden="true">🔄</span><span class="call-label">Повернуть</span>
+      </button>
+      <button type="button" class="call-btn call-hangup" id="hangup" aria-label="Положить трубку" title="Положить трубку">
+        <span class="call-ico" aria-hidden="true">📞</span><span class="call-label">Завершить</span>
+      </button>
+    </div>
+
+    <div class="call-end" id="end" hidden>
+      <button type="button" class="call-pill" id="retry" hidden>Позвонить ещё раз</button>
+      <button type="button" class="call-pill call-pill-light" id="back">Закрыть</button>
+    </div>
+  </main>
+
+  <script src="js/call.js"></script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>beemes — мессенджер с живыми эмодзи и шифрованием</title>
+  <meta name="description" content="beemes — бесплатный мессенджер для Android: переписка, звонки и видеозвонки, анимированные эмодзи, свой профиль. Все сообщения зашифрованы.">
+  <meta name="theme-color" content="#15121F">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:">
+  <meta property="og:title" content="beemes — мессенджер, который жужжит">
+  <meta property="og:description" content="Переписка, звонки, живые эмодзи. Все сообщения зашифрованы.">
+  <meta property="og:image" content="img/logo.svg">
+  <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+  <link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+  <a class="skip" href="#main">К содержимому</a>
+  <header class="top">
+    <div class="wrap top-row">
+      <a class="brand" href="./" aria-label="beemes — на главную">
+        <img src="img/logo.svg" alt="" width="34" height="38">
+        <span>bee<b>mes</b></span>
+      </a>
+      <nav class="nav" aria-label="Разделы">
+        <a href="#features">Возможности</a>
+        <a href="#security">Шифрование</a>
+        <a href="#profile">Профиль</a>
+      </nav>
+      <a class="btn btn-small" href="#download">Скачать</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Первый экран -->
+    <section class="hero">
+      <div class="comb" aria-hidden="true"></div>
+      <div class="wrap hero-grid">
+        <div class="hero-text">
+          <p class="badge"><span class="dot"></span> Сквозное шифрование всех сообщений</p>
+          <h1>Переписка, которая <span class="honey">жужжит</span></h1>
+          <p class="lead">
+            beemes — мессенджер для Android с живыми анимированными эмодзи, звонками и видеозвонками.
+            Сообщения и фото шифруются прямо на телефоне — прочитать их можете только вы и собеседник.
+          </p>
+          <div class="cta">
+            <a class="btn btn-big apk-link" href="#download" aria-disabled="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span><b>Скачать для Android</b><small class="apk-meta">загружаем…</small></span>
+            </a>
+            <a class="btn btn-ghost" href="#security">Как это работает</a>
+          </div>
+          <ul class="ticks">
+            <li>Бесплатно</li><li>Без рекламы</li><li>Без номера телефона — только @имя</li>
+          </ul>
+        </div>
+
+        <!-- Телефон с перепиской -->
+        <div class="hero-phone">
+          <div class="flyer" data-emoji="1f41d" aria-hidden="true"></div>
+          <div class="phone" role="img" aria-label="Пример переписки в beemes">
+            <div class="phone-screen">
+              <div class="p-status"><span>9:41</span><span>▴ ◼</span></div>
+              <div class="p-head">
+                <span class="hex hex-sm accent-rose">А</span>
+                <span class="p-who"><b>Алиса</b><small><i class="online"></i> в сети</small></span>
+                <span class="p-icons">📞 🎥</span>
+              </div>
+              <div class="p-body">
+                <div class="p-day">Сегодня</div>
+                <div class="msg in">Привет! Ты уже в beemes? <span class="em" data-emoji="1f44b"></span><time>12:01</time></div>
+                <div class="msg out">Да! Смотри, какие тут эмодзи<time>12:02 ✓✓</time></div>
+                <div class="msg-big out" data-emoji="1f973"></div>
+                <div class="msg in">Огонь <span class="em" data-emoji="1f525"></span><span class="em" data-emoji="1f525"></span> Созвонимся вечером?<time>12:03</time></div>
+                <div class="msg out call"><span class="call-ic">🎥</span><span><b>Видеозвонок · 12:04</b><small>Исходящий</small></span></div>
+                <div class="msg in">Обожаю <span class="em" data-emoji="1f60d"></span><time>20:17</time></div>
+              </div>
+              <div class="p-input">
+                <span class="p-emoji">☺</span><span class="p-field">Сообщение</span><span class="p-send">➤</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Возможности -->
+    <section class="section" id="features">
+      <div class="wrap">
+        <h2>Всё, что нужно для общения</h2>
+        <p class="sub">И ничего лишнего: ни рекламы, ни ленты, ни чужих глаз в вашей переписке.</p>
+        <div class="cards">
+          <article class="card">
+            <div class="card-ic" data-emoji="1f970" aria-hidden="true"></div>
+            <h3>Живые эмодзи — бесплатно</h3>
+            <p>Больше трёхсот анимированных эмодзи. Отправьте один — и он займёт весь пузырь и будет двигаться.</p>
+          </article>
+          <article class="card">
+            <div class="card-ic" data-emoji="1f512" aria-hidden="true"></div>
+            <h3>Шифрование всех сообщений</h3>
+            <p>Текст, фото и записи о звонках шифруются на телефоне. Сервер хранит только непонятный набор символов.</p>
+          </article>
+          <article class="card">
+            <div class="card-ic" data-emoji="1f60e" aria-hidden="true"></div>
+            <h3>Профиль под себя</h3>
+            <p>Фото, имя, пара слов о себе, эмодзи-статус и цвет профиля — им же окрашены ваши сообщения.</p>
+          </article>
+          <article class="card">
+            <div class="card-ic emoji-static" aria-hidden="true">📞</div>
+            <h3>Звонки и видеозвонки</h3>
+            <p>Голосом или с видео, с громкой связью. Разговор идёт напрямую между телефонами и тоже шифруется.</p>
+          </article>
+          <article class="card">
+            <div class="card-ic emoji-static" aria-hidden="true">📸</div>
+            <h3>Фотографии</h3>
+            <p>Прикрепляйте фото с подписью. Они сжимаются, чтобы не тратить трафик, и шифруются перед отправкой.</p>
+          </article>
+          <article class="card">
+            <div class="card-ic" data-emoji="2728" aria-hidden="true"></div>
+            <h3>Удобные мелочи</h3>
+            <p>Ответы на сообщения, правка и удаление, «прочитано», «в сети», без звука для чата и тёмная тема.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Шифрование -->
+    <section class="section section-alt" id="security">
+      <div class="wrap">
+        <h2>Как работает шифрование</h2>
+        <p class="sub">Простыми словами — и без обещаний, которые нельзя проверить.</p>
+        <div class="flow" aria-label="Путь сообщения">
+          <div class="flow-step">
+            <div class="flow-ic">📱</div>
+            <b>Ваш телефон</b>
+            <span>«Привет, это секрет»</span>
+          </div>
+          <div class="flow-arrow" aria-hidden="true"><span>шифрует</span></div>
+          <div class="flow-step flow-server">
+            <div class="flow-ic">🖥️</div>
+            <b>Сервер beemes</b>
+            <code>x8Jf2Q…a7Lk=</code>
+            <span>видит только шифр</span>
+          </div>
+          <div class="flow-arrow" aria-hidden="true"><span>расшифровывает</span></div>
+          <div class="flow-step">
+            <div class="flow-ic">📱</div>
+            <b>Телефон собеседника</b>
+            <span>«Привет, это секрет»</span>
+          </div>
+        </div>
+        <div class="facts">
+          <div class="fact"><h3>Ключи — только на телефонах</h3><p>У каждого свой ключ. Общий ключ чата телефоны вычисляют сами (X25519), а сообщения закрываются AES-256-GCM.</p></div>
+          <div class="fact"><h3>Пароль не уходит на сервер</h3><p>Из пароля телефон получает другой код для входа. Копия ключа на сервере закрыта вашим паролем — без него она бесполезна.</p></div>
+          <div class="fact"><h3>Можно проверить собеседника</h3><p>В профиле есть «Код безопасности»: если у вас и у собеседника одинаковые цифры, переписку никто не подменяет.</p></div>
+          <div class="fact"><h3>Честно о том, что видно серверу</h3><p>Сервер знает, кто с кем переписывается и когда, — без этого сообщения не доставить. Но не знает, что внутри.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Профиль -->
+    <section class="section" id="profile">
+      <div class="wrap profile-grid">
+        <div>
+          <h2>Ваш профиль — ваш стиль</h2>
+          <p class="sub left">Выберите цвет — им окрасится шапка профиля и ваши сообщения в чатах. Добавьте эмодзи-статус, чтобы друзья видели настроение.</p>
+          <div class="accents" role="radiogroup" aria-label="Цвет профиля">
+            <button type="button" class="accent accent-honey" data-accent="honey" role="radio" aria-checked="false" aria-label="Мёд"></button>
+            <button type="button" class="accent accent-sunset" data-accent="sunset" role="radio" aria-checked="false" aria-label="Закат"></button>
+            <button type="button" class="accent accent-rose" data-accent="rose" role="radio" aria-checked="true" aria-label="Роза"></button>
+            <button type="button" class="accent accent-violet" data-accent="violet" role="radio" aria-checked="false" aria-label="Лаванда"></button>
+            <button type="button" class="accent accent-ocean" data-accent="ocean" role="radio" aria-checked="false" aria-label="Океан"></button>
+            <button type="button" class="accent accent-mint" data-accent="mint" role="radio" aria-checked="false" aria-label="Мята"></button>
+            <button type="button" class="accent accent-lime" data-accent="lime" role="radio" aria-checked="false" aria-label="Лайм"></button>
+            <button type="button" class="accent accent-graphite" data-accent="graphite" role="radio" aria-checked="false" aria-label="Графит"></button>
+          </div>
+          <p class="hint">Нажмите на цвет — карточка профиля поменяется.</p>
+        </div>
+        <div class="pcard accent-rose" id="pcard">
+          <div class="pcard-top">
+            <span class="hex hex-lg">А</span>
+            <b class="pcard-name">Алиса <span class="em" data-emoji="1f60d"></span></b>
+            <span class="pcard-user">@alisa · в сети</span>
+          </div>
+          <div class="pcard-body">
+            <p class="pcard-bio">Люблю горы, кофе и котиков. Пишите!</p>
+            <div class="pcard-actions">
+              <span><i>💬</i>Написать</span><span><i>📞</i>Позвонить</span><span><i>🎥</i>Видео</span>
+            </div>
+            <div class="bubble-demo"><span>Привет! Как дела?</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Скачать -->
+    <section class="section download" id="download">
+      <div class="comb" aria-hidden="true"></div>
+      <div class="wrap download-box">
+        <div class="download-emoji" data-emoji="1f389" aria-hidden="true"></div>
+        <h2>Скачайте beemes</h2>
+        <p class="sub">Для Android 8 и новее. Бесплатно.</p>
+        <a class="btn btn-big apk-link" href="#download" aria-disabled="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span><b>Скачать APK</b><small class="apk-meta">загружаем…</small></span>
+        </a>
+        <ol class="steps">
+          <li><b>Скачайте файл</b> по кнопке выше.</li>
+          <li><b>Откройте его</b> из уведомления или папки «Загрузки».</li>
+          <li><b>Разрешите установку</b>, если телефон спросит, — это нужно один раз.</li>
+        </ol>
+        <div class="whats-new" id="whats-new" hidden>
+          <h3 id="new-title">Что нового</h3>
+          <p id="new-notes"></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap foot-row">
+      <div class="brand brand-foot"><img src="img/logo.svg" alt="" width="26" height="29"><span>bee<b>mes</b></span></div>
+      <nav aria-label="Документы">
+        <a href="privacy.html">Политика конфиденциальности</a>
+      </nav>
+      <p class="credit">Анимированные эмодзи — <a href="https://googlefonts.github.io/noto-emoji-animation/" rel="noopener noreferrer">Noto Emoji Animation</a> © Google, <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+    </div>
+  </footer>
+
+  <script src="js/lottie_light.min.js"></script>
+  <script src="js/site.js"></script>
+</body>
+</html>

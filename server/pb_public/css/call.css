@@ -1,0 +1,98 @@
+/* Страница звонка beemes. Всегда тёмная: медовый на тёмно-фиолетовом. */
+:root {
+  color-scheme: dark; --bg: #15121F; --bg2: #221C33; --fg: #F6F1FF; --muted: #B9AFCF; --honey: #FFB627; --honey2: #FF8A00;
+  --btn: rgba(255, 255, 255, 0.12); --red: #F0444F; --green: #2BC48A;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif; }
+.call {
+  position: fixed; inset: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center;
+  background: radial-gradient(120% 70% at 50% 0%, #3A2B5C 0%, var(--bg2) 38%, var(--bg) 100%);
+}
+/* Соты на фоне */
+.call-comb {
+  position: absolute; inset: 0; opacity: 0.07; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cpath d='M28 1 54 16v30L28 61 2 46V16z M28 61v36 M0 97' fill='none' stroke='%23FFB627' stroke-width='2'/%3E%3C/svg%3E");
+  background-size: 56px 97px;
+}
+.has-video .call-comb { display: none; }
+.call-remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; opacity: 0; transition: opacity 0.3s; }
+.has-video .call-remote { opacity: 1; }
+.call-local {
+  position: absolute; right: 14px; top: calc(14px + env(safe-area-inset-top)); width: 28vw; max-width: 160px; aspect-ratio: 3 / 4;
+  object-fit: cover; border-radius: 18px; background: #222; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); z-index: 3;
+  border: 2px solid rgba(255, 182, 39, 0.6);
+}
+.call-local.mirror { transform: scaleX(-1); }
+.call-local.off { opacity: 0.25; }
+.call-top { position: relative; z-index: 2; margin-top: calc(12vh + env(safe-area-inset-top)); text-align: center; padding: 0 16px; transition: margin 0.3s; }
+.has-video .call-top {
+  align-self: flex-start; text-align: left; margin-top: calc(16px + env(safe-area-inset-top));
+  padding-right: calc(min(28vw, 160px) + 28px); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+.has-video .call-name { font-size: 20px; }
+/* Аватар — шестиугольник-сота */
+.call-avatar {
+  position: relative; width: 132px; height: 148px; margin: 0 auto 20px; display: grid; place-items: center; overflow: hidden;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: linear-gradient(135deg, var(--honey), var(--honey2)); color: #2A1B00; font-size: 56px; font-weight: 800;
+}
+.call-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.ringing .call-top::before {
+  content: ""; position: absolute; left: 50%; top: 74px; width: 132px; height: 148px; transform: translate(-50%, -50%);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); background: var(--honey);
+  animation: pulse 1.6s ease-out infinite; z-index: -1;
+}
+.ended .call-top::before { display: none; }
+@keyframes pulse { from { opacity: 0.45; transform: translate(-50%, -50%) scale(1); } to { opacity: 0; transform: translate(-50%, -50%) scale(1.6); } }
+.has-video .call-avatar { display: none; }
+.call-name { margin: 0; font-size: 28px; font-weight: 700; }
+.call-status { margin: 8px 0 0; color: var(--muted); font-size: 16px; font-variant-numeric: tabular-nums; }
+.call-lock { margin: 10px 0 0; font-size: 13px; color: var(--honey); }
+.call-lock[hidden] { display: none; }
+.call-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; justify-content: center; gap: 18px;
+  padding: 20px 16px calc(28px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
+}
+.call-bar[hidden] { display: none; }
+.call-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; border: none; background: none; color: var(--fg);
+  font: inherit; font-size: 12px; cursor: pointer; padding: 0;
+}
+.call-btn[hidden] { display: none; }
+.call-ico {
+  width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 26px; background: var(--btn);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.call-btn.off .call-ico { background: #fff; filter: grayscale(1); }
+.call-btn.off .call-label { text-decoration: line-through; }
+.call-hangup .call-ico { background: var(--red); transform: rotate(135deg); }
+.call-btn:focus-visible .call-ico { outline: 3px solid var(--honey); outline-offset: 2px; }
+.call-end { position: absolute; bottom: calc(40px + env(safe-area-inset-bottom)); left: 16px; right: 16px; display: grid; gap: 12px; justify-items: center; z-index: 3; }
+.call-end[hidden] { display: none; }
+.call-pill {
+  min-width: 240px; min-height: 50px; padding: 0 24px; border-radius: 999px; border: none; cursor: pointer;
+  background: linear-gradient(135deg, var(--honey), var(--honey2)); color: #2A1B00; font: inherit; font-size: 16px; font-weight: 700;
+}
+.call-pill[hidden] { display: none; }
+.call-pill-light { background: var(--btn); color: var(--fg); font-weight: 600; }
+.call-unmute { position: absolute; z-index: 4; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.ended .call-avatar { filter: grayscale(0.7) brightness(0.7); }
+@media (max-width: 400px) {
+  .call-bar { gap: 8px; }
+  .call-ico { width: 56px; height: 56px; font-size: 22px; }
+}
+.call-meters { display: flex; gap: 16px; justify-content: center; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.call-meters[hidden] { display: none; }
+.has-video .call-meters { justify-content: flex-start; }
+.call-meter { display: inline-flex; align-items: flex-end; gap: 2px; }
+.call-meter i { display: inline-block; width: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); }
+.call-meter i:nth-of-type(1) { height: 5px; margin-left: 6px; }
+.call-meter i:nth-of-type(2) { height: 8px; }
+.call-meter i:nth-of-type(3) { height: 11px; }
+.call-meter i:nth-of-type(4) { height: 14px; }
+.call-meter i:nth-of-type(5) { height: 17px; }
+.call-meter i.on { background: var(--honey); }
+.call-hint { margin: 8px auto 0; max-width: 320px; font-size: 14px; color: #FFD27A; min-height: 1em; }
+.has-video .call-hint { margin-left: 0; }
+.ended .call-meters, .ended .call-hint { display: none; }
