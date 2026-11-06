@@ -123,9 +123,20 @@ store.on("chats", () => {
   if (navigator.setAppBadge) (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
 });
 
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && store.state.me) { store.ping(); store.refreshChats().catch(() => {}); }
-});
+// Вернулись в beemes (телефон усыплял страницу, свернули окно, появился интернет): переподключаемся
+// и догружаем то, что пришло, пока нас не было, — и список чатов, и открытый чат.
+let hiddenAt = 0;
+function resume() {
+  if (!store.state.me || !store.state.privateKey) return;
+  if (hiddenAt && Date.now() - hiddenAt > 20000) realtime.restart(); else realtime.ensure();
+  hiddenAt = 0;
+  store.ping();
+  store.refreshChats().catch(() => {});
+  if (store.state.openChatId) store.loadMessages(store.state.openChatId).catch(() => {});
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) hiddenAt = Date.now(); else resume(); });
+window.addEventListener("online", resume);
+window.addEventListener("pageshow", (e) => { if (e.persisted) resume(); });
 
 window.addEventListener("hashchange", route);
 
@@ -133,6 +144,8 @@ window.addEventListener("hashchange", route);
   await loadEmoji();
   app.classList.remove("boot");
   const signedIn = await store.restore().catch(() => false);
-  if (signedIn) onSignedIn();
+  if (signedIn === "locked") {
+    auth.unlock(app, store.state.me, onSignedIn, async () => { await store.logout(); location.hash = "#/login"; route(); });
+  } else if (signedIn) onSignedIn();
   else route();
 })();

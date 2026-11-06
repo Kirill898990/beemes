@@ -42,6 +42,14 @@ export function start() {
   };
 }
 
+/** Соединение живо? Если нет (телефон усыплял страницу, пропадал интернет) — подключиться заново. */
+export function ensure() {
+  if (!source || source.readyState === EventSource.CLOSED) start();
+}
+
+/** Принудительно переподключиться (после возвращения из фона соединение может «висеть», не сообщая об ошибке). */
+export const restart = () => start();
+
 export function stop() {
   clearTimeout(retryTimer);
   if (source) source.close();

@@ -136,3 +136,28 @@ export function register(root, go, done) {
   ));
   name.input.focus();
 }
+
+/** Вход сохранён, но ключа на этом устройстве нет — достаточно пароля. */
+export function unlock(root, me, done, other) {
+  const pass = field("Пароль", { type: "password", autocomplete: "current-password" });
+  passwordToggle(pass.input);
+  const err = h("p", { class: "form-error", role: "alert" });
+  const btn = h("button", { type: "submit", class: "btn btn-primary btn-wide" }, "Открыть переписку");
+  const form = h("form", { class: "auth-form", novalidate: true }, pass.wrap, err, btn,
+    h("button", { type: "button", class: "btn btn-text", onclick: other }, "Войти в другой аккаунт"));
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    if (!pass.input.value) { err.textContent = "Впишите пароль"; return; }
+    btn.disabled = true;
+    btn.textContent = "Открываем…";
+    try { await store.unlock(pass.input.value); done(); } catch (ex) { err.textContent = ex.message; btn.disabled = false; btn.textContent = "Открыть переписку"; }
+  };
+  root.replaceChildren(shell(
+    h("div", { class: "auth-hero small" }, h("img", { class: "logo-float", src: "../img/logo.svg", alt: "", width: 84, height: 95 })),
+    h("h1", { class: "unlock-title" }, "@" + (me.username || "")),
+    h("p", { class: "auth-sub" }, "Вы вошли, но на этом устройстве нет ключа шифрования. Введите пароль — переписка откроется."),
+    form,
+  ));
+  pass.input.focus();
+}

@@ -37,7 +37,44 @@ async function idbDo(mode, fn) {
 }
 const saveKey = (key) => idbDo("readwrite", (s) => s.put(key, "private"));
 const loadKey = () => idbDo("readonly", (s) => s.get("private")).catch(() => null);
+const saveRaw = (raw) => idbDo("readwrite", (s) => s.put(raw, "private_raw"));
+const loadRaw = () => idbDo("readonly", (s) => s.get("private_raw")).catch(() => null);
 const clearKeys = () => idbDo("readwrite", (s) => s.clear()).catch(() => {});
+
+/**
+ * Safari и всё на iPhone/iPad (там любой браузер — Safari внутри) сохраняет неизвлекаемый ключ WebCrypto,
+ * но после перезапуска приложения с экрана «Домой» прочитать его уже не может. Там храним сам ключ (32 байта)
+ * в хранилище сайта — так же делают другие веб-мессенджеры. В остальных браузерах ключ неизвлекаемый.
+ */
+function keepRawKey() {
+  try { if (localStorage.getItem("bm_key_raw") === "1") return true; } catch (_) { /* ignore */ }
+  const ua = navigator.userAgent || "";
+  const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const safari = /Safari/.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox|Android/.test(ua);
+  return ios || safari;
+}
+
+/** Сохранить ключ на этом устройстве. */
+async function storeKey(raw) {
+  const key = await C.importPrivate(raw, false);
+  try { await saveKey(key); } catch (_) { /* Safari бывает не умеет — ниже запасной способ */ }
+  if (keepRawKey()) await saveRaw(new Uint8Array(raw));
+  return key;
+}
+
+/** Ключ с этого устройства: неизвлекаемый, иначе из сохранённых байтов. */
+async function storedKey() {
+  const key = await loadKey();
+  if (key) {
+    // проверяем, что ключ действительно работает (Safari может вернуть «пустой»)
+    try { await C.chatKeyBytes(key, C.unb64("WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns="), "check"); return key; } catch (_) { /* ниже */ }
+  }
+  const raw = await loadRaw();
+  if (raw && raw.length === 32) {
+    try { return await C.importPrivate(new Uint8Array(raw), false); } catch (_) { /* ниже */ }
+  }
+  return null;
+}
 
 // ---------- Состояние ----------
 export const state = {
@@ -95,18 +132,23 @@ function saveSession(token, me) {
 // ---------- Вход ----------
 
 /** При открытии страницы: вход сохранён? */
+/**
+ * При открытии страницы: вход сохранён?
+ * → true (вошли), false (нужно войти) или "locked" (вход есть, но ключа на устройстве нет — нужен только пароль).
+ */
 export async function restore() {
   const token = ls.get("bm_token");
   const meRaw = ls.get("bm_me");
-  const key = await loadKey();
-  if (!token || !meRaw || !key) return false;
-  setToken(token);
-  state.privateKey = key;
+  if (!token || !meRaw) return false;
   try {
     state.me = JSON.parse(meRaw);
   } catch (_) {
     return false;
   }
+  setToken(token);
+  const key = await storedKey();
+  if (!key) { remember(state.me); return "locked"; }
+  state.privateKey = key;
   remember(state.me);
   try {
     const r = await post("api/collections/users/auth-refresh");
@@ -147,13 +189,27 @@ async function login_(username, password) {
     setToken("");
     throw e instanceof ApiError ? e : new ApiError("Не получилось расшифровать ключ. Проверьте пароль.");
   }
-  const key = await C.importPrivate(raw, false);
+  state.privateKey = await storeKey(raw);
   raw.fill(0);
-  await saveKey(key);
-  state.privateKey = key;
   saveSession(auth.token, auth.record);
 }
 export { login_ as login };
+
+/** Вход есть, а ключа на устройстве нет: открываем переписку паролем (копия ключа на сервере закрыта им). */
+export async function unlock(password) {
+  const me = state.me;
+  const keys = await get("api/bm/keys");
+  let raw;
+  try {
+    raw = await C.unwrapPrivateKey(keys.encKey, keys.keySalt, password);
+    if (C.b64(await C.publicFromPrivate(raw)) !== keys.publicKey) throw new Error("mismatch");
+  } catch (_) {
+    throw new ApiError("Неверный пароль");
+  }
+  state.privateKey = await storeKey(raw);
+  raw.fill(0);
+  saveSession(getToken(), me);
+}
 
 export async function logout() {
   setToken("");
