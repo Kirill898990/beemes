@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 #
 # Установка (или обновление) сервера мессенджера beemes на Ubuntu одной командой.
-# Можно ставить на тот же сервер, где уже работает сайт «Простая химия»: оба сайта будут работать вместе.
+# Ставится на свой сервер (Ubuntu 24.04). Можно и на сервер, где уже работает сайт «Простая химия»:
+# тогда оба сайта будут работать вместе.
 #
 # Запуск на сервере (под пользователем root):
 #   curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main/server/install.sh \
-#     | bash -s -- beemes.урокискириллом.рф ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
+#     | bash -s -- beemes.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
 #
 # Что делает:
 #   1. скачивает PocketBase и файлы beemes с GitHub (база, правила доступа, сайт, страница звонка);
 #   2. запускает beemes на 127.0.0.1:8091 с автозапуском (папка /opt/beemes);
-#   3. ставит Caddy — он получает бесплатные сертификаты https и раздаёт оба сайта на порту 443.
+#   3. ставит Caddy — он получает бесплатные сертификаты https (для beemes.ru и www.beemes.ru).
 #      Если на сервере уже работает сайт школы, он переводится за Caddy (его база не трогается);
 #   4. для звонков использует тот же TURN-сервер (coturn), что и сайт школы, или ставит его;
 #   5. создаёт администратора (если указаны почта и пароль).
@@ -39,7 +40,7 @@ TURN_CONF="${TURN_CONF:-/etc/turnserver.conf}"
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[1;31mОшибка: %s\033[0m\n' "$1" >&2; exit 1; }
 
-[ -n "$DOMAIN_INPUT" ] || fail "укажите домен, например: bash install.sh beemes.урокискириллом.рф admin@mail.ru Пароль123"
+[ -n "$DOMAIN_INPUT" ] || fail "укажите домен, например: bash install.sh beemes.ru admin@mail.ru Пароль123"
 [ "$(id -u)" -eq 0 ] || fail "запустите от имени root (или добавьте sudo перед bash)"
 if [ -n "$ADMIN_EMAIL" ] && [ "${#ADMIN_PASSWORD}" -lt 10 ]; then
   fail "пароль администратора должен быть не короче 10 символов"
@@ -59,7 +60,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq curl unzip idn2 ca-certificates >/dev/null
 
-# Русский домен → технический вид: beemes.урокискириллом.рф → beemes.xn--h1aaafbiaikhnfkx.xn--p1ai
+# Русский домен → технический вид (punycode), например: пчёлка.рф → xn--...; обычный домен не меняется.
 DOMAIN="$(idn2 "$DOMAIN_INPUT")"
 DOMAIN="${DOMAIN#www.}"
 
@@ -252,6 +253,15 @@ $DOMAIN {
 	reverse_proxy 127.0.0.1:$PORT
 }
 EOF
+# Домен вида beemes.ru: www.beemes.ru тоже открывается и ведёт на основной адрес.
+if [ "$(printf '%s' "$DOMAIN" | tr -cd '.' | wc -c)" = 1 ]; then
+  cat >> "$CADDY_DIR/sites/beemes.caddy" <<EOF
+
+www.$DOMAIN {
+	redir https://$DOMAIN{uri} permanent
+}
+EOF
+fi
 caddy validate --config "$CADDY_DIR/Caddyfile" --adapter caddyfile >/dev/null 2>&1 || fail "ошибка в настройках Caddy: caddy validate --config $CADDY_DIR/Caddyfile"
 
 # Сайт школы держит порты сам — переводим его за Caddy его же установкой: увидев Caddy,

@@ -11,8 +11,7 @@ plugins {
 if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
 
 // ===== АДРЕС СЕРВЕРА =====
-// https://beemes.урокискириллом.рф (русские домены в программах пишутся в виде «punycode»).
-val releaseServerUrl = "https://beemes.xn--h1aaafbiaikhnfkx.xn--p1ai"
+val releaseServerUrl = "https://beemes.ru"
 // Для проверки с сервером на своём компьютере: в local.properties строка server.url=http://10.0.2.2:8091
 val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
