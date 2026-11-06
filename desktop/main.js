@@ -143,6 +143,8 @@ function createWindow() {
     if (tray) tray.setToolTip(n ? `beemes — непрочитанных: ${n}` : "beemes");
   });
   win.on("focus", () => win.flashFrame(false));
+  win.on("hide", flush);
+  win.on("session-end", flush); // Windows выключается или выходит из учётной записи
   win.loadURL(SITE);
 }
 
@@ -199,8 +201,11 @@ function appMenu() {
 
 app.on("web-contents-created", (_e, wc) => guard(wc));
 app.on("second-instance", show);
-app.on("before-quit", () => { quitting = true; });
+/** Сразу записать вход и ключ на диск (браузер пишет с задержкой — при резком закрытии вход мог потеряться). */
+const flush = () => { try { session.defaultSession.flushStorageData(); } catch (_) { /* ignore */ } };
+app.on("before-quit", () => { quitting = true; flush(); });
 ipcMain.on("beemes:show", show);
+ipcMain.on("beemes:flush", flush);
 
 if (firstInstance) app.whenReady().then(() => {
   app.setAppUserModelId("ru.beemes.desktop");
@@ -210,6 +215,8 @@ if (firstInstance) app.whenReady().then(() => {
   tray.setToolTip("beemes");
   tray.setContextMenu(trayMenu());
   tray.on("click", show);
+  const timer = setInterval(flush, 15000);
+  if (timer.unref) timer.unref();
   // Первый запуск: включаем автозапуск (выключить — в меню значка в трее).
   const s = readJson(settingsFile(), {});
   if (!s.autoStartSet) { startWithWindows(true); writeJson(settingsFile(), { ...s, autoStartSet: true }); tray.setContextMenu(trayMenu()); }

@@ -43,7 +43,7 @@ const electron = {
   dialog: { showMessageBox() {} },
   shell: { openExternal: (u) => { calls.external.push(u); return Promise.resolve(); } },
   clipboard: { writeText() {} },
-  session: { defaultSession: { setPermissionRequestHandler(fn) { electron.permRequest = fn; }, setPermissionCheckHandler(fn) { electron.permCheck = fn; } } },
+  session: { defaultSession: { setPermissionRequestHandler(fn) { electron.permRequest = fn; }, setPermissionCheckHandler(fn) { electron.permCheck = fn; }, flushStorageData() { calls.flushed = (calls.flushed || 0) + 1; } } },
 };
 require("fs").mkdirSync(electron.app.getPath(), { recursive: true });
 const orig = Module._resolveFilename;
@@ -89,5 +89,10 @@ const ask = (perm, url) => new Promise((res) => electron.permRequest(null, perm,
   ok(wc.open({ url: "https://example.com/" }).action === "deny" && calls.external.includes("https://example.com/"), "ссылки на другие сайты — в браузере");
   wc.emit("did-fail-load", {}, -106, "ERR_INTERNET_DISCONNECTED", main.SITE, true);
   ok(calls.loadFile.at(-1)[0].endsWith("offline.html"), "без интернета — экран «Нет связи»");
+  const before = calls.flushed || 0;
+  ipc["beemes:flush"]();
+  w.ev.hide();
+  handlers["before-quit"]();
+  ok((calls.flushed || 0) - before === 3, "вход записывается на диск сразу: по просьбе страницы, при сворачивании и перед выходом");
   console.log(`\n${n} checks, 0 fails`);
 })().catch((e) => { console.error("FAIL", e.message); process.exit(1); });

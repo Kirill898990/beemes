@@ -79,6 +79,9 @@ function remember(u) {
   emit("users");
   return state.users.get(u.id);
 }
+/** В приложении для Windows — сразу записать на диск. */
+const flushDesktop = () => { try { if (window.beemesDesktop && window.beemesDesktop.flush) window.beemesDesktop.flush(); } catch (_) { /* ignore */ } };
+
 function saveSession(token, me) {
   setToken(token);
   state.me = me;
@@ -86,6 +89,7 @@ function saveSession(token, me) {
   ls.set("bm_token", token);
   ls.set("bm_me", JSON.stringify(me));
   emit("me", me);
+  flushDesktop();
 }
 
 // ---------- Вход ----------
@@ -165,6 +169,7 @@ export async function logout() {
   photoUrls.forEach((u) => URL.revokeObjectURL(u));
   photoUrls.clear();
   emit("me", null);
+  flushDesktop();
 }
 
 // ---------- Люди и профиль ----------
