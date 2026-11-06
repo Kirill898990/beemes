@@ -10,6 +10,8 @@
 
   // ---------- Живые эмодзи: играют, только пока видны на экране ----------
   const players = new Map();
+  // Пчела 🐝 в анимации Google большую часть времени улетает вдаль — крутим только кадры, где она близко.
+  const SEGMENTS = { "1f41d": [255, 329] };
   function mount(el) {
     const code = el.dataset.emoji;
     if (!window.lottie) { el.textContent = charOf(code); return; }
@@ -31,7 +33,12 @@
         if (!players.has(e.target)) mount(e.target);
         const anim = players.get(e.target);
         if (!anim) return;
-        if (e.isIntersecting) { if (reduced) anim.goToAndStop(anim.totalFrames ? anim.totalFrames - 1 : 0, true); else anim.play(); }
+        const seg = SEGMENTS[e.target.dataset.emoji];
+        if (e.isIntersecting) {
+          if (reduced) anim.goToAndStop(seg ? seg[0] : anim.totalFrames ? anim.totalFrames - 1 : 0, true);
+          else if (seg) { if (anim.isLoaded) anim.playSegments(seg, true); else anim.addEventListener("DOMLoaded", () => anim.playSegments(seg, true)); }
+          else anim.play();
+        }
         else anim.pause();
       });
     }, { rootMargin: "120px" });

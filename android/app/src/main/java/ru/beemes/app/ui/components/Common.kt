@@ -111,6 +111,7 @@ fun AnimatedEmoji(code: String, size: Dp, modifier: Modifier = Modifier, play: B
         composition,
         iterations = if (play) LottieConstants.IterateForever else 1,
         isPlaying = play,
+        clipSpec = Emoji.segment(code)?.let { (from, to) -> com.airbnb.lottie.compose.LottieClipSpec.Frame(from, to) },
         modifier = modifier.size(size),
     )
 }

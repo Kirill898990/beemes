@@ -1,0 +1,68 @@
+# beemes для Windows: GitHub сам собирает установщик на компьютере с Windows.
+#
+# Когда меняется папка desktop: в ветке main — собирает и выкладывает установщик в «Releases» репозитория
+# (постоянная ссылка: /releases/latest/download/BeemesSetup.exe). В других ветках — только проверяет
+# сборку, а готовый файл лежит в «Artifacts» этого запуска.
+# Собрать вручную: вкладка Actions → «Приложение для Windows» → Run workflow.
+# Новая версия: поднимите "version" в desktop/package.json.
+
+name: Приложение для Windows
+
+on:
+  push:
+    paths: ["desktop/**", ".github/workflows/windows-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Установить зависимости
+        run: npm ci
+
+      - name: Проверить правила приложения
+        run: node test.js
+
+      - name: Собрать установщик
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Сохранить установщик в Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeemesSetup
+          path: desktop/dist/BeemesSetup.exe
+          retention-days: 14
+
+      - name: Выложить в Releases
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="windows-v$VERSION"
+          NOTES="beemes для Windows 10/11. Скачайте BeemesSetup.exe и запустите. Если Windows предупредит о неизвестном издателе — «Подробнее» → «Выполнить в любом случае»."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/BeemesSetup.exe --clobber
+          else
+            gh release create "$TAG" dist/BeemesSetup.exe --title "beemes для Windows $VERSION" --notes "$NOTES" --latest
+          fi

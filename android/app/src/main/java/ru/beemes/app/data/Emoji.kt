@@ -38,6 +38,13 @@ object Emoji {
 
     fun asset(code: String) = "emoji/$code.json"
 
+    /**
+     * Кадры, которые крутим по кругу. У некоторых анимаций героиня улетает вдаль (пчела 🐝 большую часть
+     * времени — крошечная точка), поэтому показываем только ту часть, где её хорошо видно.
+     */
+    fun segment(code: String): Pair<Int, Int>? = SEGMENTS[code]
+    private val SEGMENTS = mapOf("1f41d" to (255 to 329))
+
     /** Код для эмодзи-статуса: в профиле хранится код (1f41d), но на всякий случай понимаем и сам символ. */
     fun statusCode(value: String): String? =
         value.takeIf { it.isNotBlank() }?.let { v -> if (Regex("^[0-9a-f_]+$").matches(v)) v else codeOf(v) }

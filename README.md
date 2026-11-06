@@ -4,7 +4,9 @@
 и настраиваемые профили. Все сообщения шифруются на телефоне — сервер хранит только шифр.
 
 - `android/` — приложение (Kotlin, Jetpack Compose).
-- `server/` — сервер на PocketBase: база, правила доступа, push-уведомления, звонки, сайт-визитка и страница звонка.
+- `server/` — сервер на PocketBase: база, правила доступа, push-уведомления, звонки, сайт-визитка, страница звонка
+  и **веб-версия** (`server/pb_public/web`, открывается по адресу `/web/`).
+- `desktop/` — **приложение для Windows 10/11**: окно с веб-версией, работа в трее, автозапуск. Установщик собирает GitHub.
 - `tools/fetch_emoji.py` — скачивает анимированные эмодзи Noto (Google, CC BY 4.0) в приложение.
 
 ## Как устроено шифрование
@@ -84,6 +86,16 @@ curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main
 ```bash
 cd android && ./gradlew :app:testDebugUnitTest
 ```
+
+## Веб-версия и Windows
+
+Веб-версия (`/web/`) шифрует так же, как телефон (WebCrypto: X25519, HKDF, AES-GCM, PBKDF2), поэтому переписка
+общая: можно писать с телефона и с компьютера. Проверка совпадения с Android: `node server/tests/web-crypto.test.mjs`.
+
+Приложение для Windows (`desktop/`) — окно с веб-версией. Установщик собирает GitHub (Actions → «Приложение для Windows»)
+и выкладывает в Releases; постоянная ссылка:
+`https://github.com/Kirill898990/beemes/releases/latest/download/BeemesSetup.exe`. Новая версия — поднять `version`
+в `desktop/package.json`. Закрытое окно уходит в трей (значок пчёлки возле часов), чтобы приходили сообщения и звонки.
 
 ## Благодарности
 

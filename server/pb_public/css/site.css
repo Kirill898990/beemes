@@ -181,6 +181,13 @@ h2 { margin: 0; text-align: center; font-size: clamp(30px, 4.2vw, 46px); line-he
   content: counter(s); position: absolute; left: 18px; top: 18px; width: 34px; height: 38px; display: grid; place-items: center;
   clip-path: var(--hex); background: linear-gradient(135deg, #FFC23D, var(--honey-2)); color: #241800; font-weight: 800;
 }
+.more-platforms { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 14px; }
+.more-platforms .btn { padding: 12px 22px 12px 18px; text-align: left; }
+.more-platforms svg { width: 26px; height: 26px; flex: none; }
+.more-platforms b { display: block; line-height: 1.2; }
+.more-platforms small { display: block; font-weight: 500; font-size: 13px; opacity: 0.75; }
+.note-win { margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+.also { margin: 16px 0 0; color: var(--muted); font-size: 15px; }
 .whats-new { margin-top: 28px; max-width: 560px; padding: 18px 22px; border-radius: var(--radius); background: rgba(255, 182, 39, 0.08); box-shadow: inset 0 0 0 1px rgba(255, 182, 39, 0.25); text-align: left; }
 .whats-new[hidden] { display: none; }
 .whats-new h3 { margin: 0 0 6px; font-size: 16px; color: var(--honey-soft); }

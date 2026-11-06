@@ -1,0 +1,46 @@
+{
+  "name": "beemes-desktop",
+  "productName": "beemes",
+  "version": "1.0.0",
+  "description": "beemes — мессенджер с живыми эмодзи и шифрованием (приложение для Windows)",
+  "author": "Бастриков Кирилл",
+  "homepage": "https://kbast.ru/",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test.js",
+    "dist": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "ru.beemes.desktop",
+    "productName": "beemes",
+    "copyright": "© Бастриков Кирилл",
+    "artifactName": "BeemesSetup.${ext}",
+    "directories": { "buildResources": "build", "output": "dist" },
+    "files": ["main.js", "preload.js", "offline.html", "icon.png", "package.json"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.ico",
+      "executableName": "beemes"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "beemes",
+      "uninstallDisplayName": "beemes",
+      "language": "1049",
+      "multiLanguageInstaller": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "runAfterFinish": true
+    }
+  }
+}

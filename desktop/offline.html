@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <title>beemes — нет связи</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: "Segoe UI", Roboto, system-ui, sans-serif; background: #15121F; color: #F3EFFF; }
+    main { height: 100%; display: grid; place-items: center; text-align: center; padding: 24px; box-sizing: border-box; }
+    img { width: 96px; height: 108px; }
+    h1 { font-size: 26px; margin: 18px 0 6px; }
+    p { margin: 0 0 22px; color: #B4ADC9; font-size: 16px; max-width: 420px; }
+    button { font: inherit; font-size: 16px; font-weight: 700; border: none; border-radius: 999px; padding: 12px 28px; background: linear-gradient(135deg, #FFC23D, #FF8A00); color: #241800; cursor: pointer; }
+    button:focus-visible { outline: 3px solid #FFDE9E; outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div>
+      <img src="icon.png" alt="">
+      <h1>Нет связи с beemes</h1>
+      <p>Проверьте подключение к интернету. Как только связь появится, beemes откроется сам — или нажмите «Повторить».</p>
+      <button id="retry" autofocus>Повторить</button>
+    </div>
+  </main>
+  <script>
+    const target = new URLSearchParams(location.search).get("u") || "";
+    const go = () => { if (/^https?:\/\//.test(target)) location.href = target; };
+    document.getElementById("retry").addEventListener("click", go);
+    window.addEventListener("online", go);
+    setInterval(() => { if (navigator.onLine) go(); }, 30000);
+  </script>
+</body>
+</html>

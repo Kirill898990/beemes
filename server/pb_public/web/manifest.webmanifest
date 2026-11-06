@@ -1,0 +1,12 @@
+{
+  "name": "beemes",
+  "short_name": "beemes",
+  "description": "Мессенджер с живыми эмодзи и шифрованием",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#15121F",
+  "theme_color": "#15121F",
+  "lang": "ru",
+  "icons": [{ "src": "../img/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

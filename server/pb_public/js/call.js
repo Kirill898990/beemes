@@ -134,9 +134,15 @@
     $("bar").hidden = true;
     $("end").hidden = false;
     $("retry").hidden = !canRetry || !chat;
-    if (!answering && ringing && bridge && bridge.ended) {
+    if (!answering && ringing) {
       const status = connected ? "done" : outcome === "declined" ? "declined" : "missed";
-      try { bridge.ended(wantVideo, connected ? seconds() : 0, status); } catch (_) { /* ignore */ }
+      const secs = connected ? seconds() : 0;
+      if (bridge && bridge.ended) {
+        try { bridge.ended(wantVideo, secs, status); } catch (_) { /* ignore */ }
+      } else if (window.opener && !window.opener.closed) {
+        // Веб-версия и Windows: запись о звонке оставляет окно с чатами (оно шифрует её, как сообщение).
+        try { window.opener.postMessage({ type: "beemes-call-ended", chat: chatId, video: wantVideo, seconds: secs, status }, location.origin); } catch (_) { /* ignore */ }
+      }
     }
   }
 
@@ -336,7 +342,7 @@
   }
 
   async function start() {
-    if (!token) return finish("Звонить можно из приложения beemes", false);
+    if (!token) return finish("Откройте звонок из чата beemes", false);
     if (!chatId) return finish("Не понятно, кому звонить. Откройте звонок из чата.", false);
     if (!window.RTCPeerConnection || !navigator.mediaDevices) return finish("Здесь не получается позвонить. Обновите приложение Android System WebView.", false);
     try {
@@ -424,7 +430,8 @@
   });
   $("back").addEventListener("click", () => {
     if (inApp && bridge) return bridge.close();
-    location.href = "./";
+    if (window.opener) return window.close();
+    location.href = "./web/";
   });
   // Закрыли страницу во время звонка — кладём трубку.
   window.addEventListener("pagehide", () => { if (!ended && callId && me && chat) send("hangup").catch(() => {}); });
