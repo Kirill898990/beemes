@@ -1,7 +1,13 @@
 /* Настройки: мой профиль, оформление, уведомления, пароль, заблокированные, выход и удаление аккаунта. */
 import { h, icon, iconButton, avatar, nameWithStatus, ACCENTS, accentOf, accentVars, animoji, emojiGroups, statusCode, modal, toast, disposeEmoji, titleOf } from "../ui.js";
 import * as store from "../store.js";
-import { askNotify, canNotify } from "../calls.js";
+import { askNotify, canNotify, messageSound } from "../calls.js";
+
+function soundRow() {
+  const sw = h("input", { type: "checkbox", class: "switch", checked: store.soundOn.get(), "aria-label": "Звук новых сообщений" });
+  sw.onchange = () => { store.soundOn.set(sw.checked); if (sw.checked) setTimeout(() => messageSound(), 50); };
+  return h("label", { class: "row-item" }, icon("bell"), h("span", {}, h("b", {}, "Звук новых сообщений"), h("small", {}, "Короткий сигнал, когда beemes открыт")), sw);
+}
 
 const row = (ic, title, sub, onclick, cls = "") =>
   h("button", { type: "button", class: "row-item " + cls, onclick }, icon(ic), h("span", {}, h("b", {}, title), sub ? h("small", {}, sub) : null), h("span", { class: "chev" }, "›"));
@@ -36,6 +42,7 @@ export function menu(root, { go, route }) {
       h("h3", {}, "Оформление"), h("div", { class: "card pad" }, themeSeg),
       h("h3", {}, "Уведомления"),
       h("div", { class: "card" }, h("label", { class: "row-item" }, icon("bell"), h("span", {}, h("b", {}, "Уведомления о сообщениях"), h("small", {}, "Когда окно beemes не на экране")), notifyBtn),
+        soundRow(),
         row("phone", "Проверить уведомления на телефоне", "Пришлём пробное уведомление и скажем, если что-то не так", pushTest)),
       h("h3", {}, "Безопасность"),
       h("div", { class: "card" },

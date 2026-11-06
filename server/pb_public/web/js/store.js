@@ -106,6 +106,10 @@ export const notifyOn = {
   get: () => ls.get("bm_notify") !== "0",
   set: (v) => ls.set("bm_notify", v ? "1" : "0"),
 };
+export const soundOn = {
+  get: () => ls.get("bm_sound") !== "0",
+  set: (v) => ls.set("bm_sound", v ? "1" : "0"),
+};
 
 export const parseTime = (v) => (v ? new Date(String(v).replace(" ", "T")) : null);
 export const serverTime = (d) => d.toISOString().replace("T", " ");

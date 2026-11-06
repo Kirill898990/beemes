@@ -115,12 +115,42 @@ function notify(title, body, tag, chatId, user, sticky = false) {
   } catch (_) { /* не поддерживается */ }
 }
 
+// ---------- Звук нового сообщения ----------
+// Браузеры (особенно на iPhone) разрешают звук только после первого касания страницы — «будим» звук на нём.
+let audio = null;
+function unlockAudio() {
+  try {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume().catch(() => {});
+  } catch (_) { /* без звука */ }
+}
+["pointerdown", "keydown", "touchend"].forEach((ev) => window.addEventListener(ev, unlockAudio, { passive: true, capture: true }));
+
+/** Короткий «медовый» сигнал: две ноты вверх. quiet — тише (сообщение в открытом чате). */
+export function messageSound(quiet = false) {
+  if (!store.soundOn.get() || !audio || audio.state !== "running") return;
+  const t = audio.currentTime;
+  [[0, 784], [0.11, 1175]].forEach(([dt, f]) => {
+    const o = audio.createOscillator();
+    const g = audio.createGain();
+    o.type = "sine";
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t + dt);
+    g.gain.exponentialRampToValueAtTime(quiet ? 0.05 : 0.14, t + dt + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.22);
+    o.connect(g).connect(audio.destination);
+    o.start(t + dt);
+    o.stop(t + dt + 0.25);
+  });
+}
+
 store.on("new-message", (msg) => {
   const me = store.state.me;
   if (!me || msg.senderId === me.id) return;
   const item = store.chatItem(msg.chatId);
   if (item && item.muted) return;
   const looking = !document.hidden && document.hasFocus() && store.state.openChatId === msg.chatId;
+  messageSound(looking);
   if (looking) return;
   const sender = store.state.users.get(msg.senderId) || (item && item.peer);
   notify(titleOf(sender), preview(msg, me.id), "chat-" + msg.chatId, msg.chatId, sender);
