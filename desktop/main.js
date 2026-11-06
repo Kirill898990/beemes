@@ -47,7 +47,8 @@ function setupPermissions(ses) {
     const url = (details && details.requestingUrl) || (wc && wc.getURL()) || "";
     callback(isOurs(url) && ALLOWED.has(permission));
   });
-  ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => requestingOrigin === ORIGIN && ALLOWED.has(permission));
+  // Адрес сайта здесь приходит то с «/» на конце, то без — сравниваем как адрес, а не как строку.
+  ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => isOurs(requestingOrigin) && ALLOWED.has(permission));
 }
 
 function contextMenu(wc, params) {

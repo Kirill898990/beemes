@@ -18,7 +18,13 @@ export function menu(root, { go, route }) {
   notifyBtn.onchange = async () => {
     if (notifyBtn.checked) {
       const p = await askNotify();
-      if (p !== "granted") { notifyBtn.checked = false; toast(p === "unsupported" ? "Этот браузер не умеет показывать уведомления" : "Разрешите уведомления для этого сайта в настройках браузера"); return; }
+      if (p !== "granted") {
+        notifyBtn.checked = false;
+        toast(p === "unsupported" ? "Этот браузер не умеет показывать уведомления"
+          : window.beemesDesktop ? "Скачайте новую версию beemes для Windows на сайте — в этой уведомления не включаются"
+            : "Разрешите уведомления для этого сайта в настройках браузера", 5000);
+        return;
+      }
     }
     store.notifyOn.set(notifyBtn.checked);
   };

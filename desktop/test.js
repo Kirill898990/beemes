@@ -80,6 +80,8 @@ const ask = (perm, url) => new Promise((res) => electron.permRequest(null, perm,
   ok(await ask("media", "https://kbast.ru/call.html") === true, "микрофон и камера для звонков разрешены beemes");
   ok(await ask("notifications", "https://kbast.ru/web/") === true, "уведомления разрешены beemes");
   ok(await ask("media", "https://evil.example/") === false && await ask("geolocation", main.SITE) === false, "чужим и лишнего — нет");
+  ok(electron.permCheck(null, "notifications", "https://kbast.ru/") === true && electron.permCheck(null, "notifications", "https://kbast.ru") === true, "проверка уведомлений: адрес с «/» на конце и без");
+  ok(electron.permCheck(null, "notifications", "https://evil.example/") === false, "чужому сайту уведомления нельзя");
   const wc = fakeWc();
   handlers["web-contents-created"](null, wc);
   const call = wc.open({ url: "https://kbast.ru/call.html#chat=1&video=1" });
