@@ -21,10 +21,26 @@
     "productName": "beemes",
     "copyright": "© Бастриков Кирилл",
     "artifactName": "BeemesSetup.${ext}",
-    "directories": { "buildResources": "build", "output": "dist" },
-    "files": ["main.js", "preload.js", "offline.html", "icon.png", "package.json"],
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "offline.html",
+      "icon.png",
+      "package.json"
+    ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.ico",
       "executableName": "beemes"
     },
@@ -41,6 +57,11 @@
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "runAfterFinish": true
-    }
+    },
+    "compression": "maximum",
+    "electronLanguages": [
+      "ru",
+      "en-US"
+    ]
   }
 }
