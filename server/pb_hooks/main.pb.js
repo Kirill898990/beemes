@@ -67,6 +67,38 @@ routerAdd("POST", "/api/bm/push-test", (e) => {
   return e.json(200, report)
 }, $apis.requireAuth("users"))
 
+// ---------- Живые эмодзи ----------
+// Самые нужные лежат в pb_public/emoji. Остальные анимации Noto (группы «Ещё …» в index.json) сервер скачивает
+// у Google один раз при первом запросе и хранит в pb_data/emoji — телефоны и браузеры к Google не обращаются.
+routerAdd("GET", "/emoji/{name}", (e) => {
+  const name = e.request.pathValue("name")
+  if (!/^([0-9a-f]{2,6}(_[0-9a-f]{2,6}){0,7}|index)\.json$/.test(name)) throw new NotFoundError()
+  const send = (bytes) => {
+    e.response.header().set("Cache-Control", name === "index.json" ? "no-cache" : "public, max-age=2592000, immutable")
+    return e.blob(200, "application/json", bytes)
+  }
+  const local = `${__hooks}/../pb_public/emoji/${name}`
+  try { return send($os.readFile(local)) } catch (_) { /* ниже */ }
+  const dir = e.app.dataDir() + "/emoji"
+  try { return send($os.readFile(`${dir}/${name}`)) } catch (_) { /* ниже */ }
+  // Только то, что есть в списке, — сервер не скачивает что попало.
+  const code = name.replace(/\.json$/, "")
+  let codes = e.app.store().get("emoji_codes")
+  if (!codes) {
+    codes = {}
+    try {
+      JSON.parse(toString($os.readFile(`${__hooks}/../pb_public/emoji/index.json`))).forEach((g) => g.items.forEach((it) => { codes[it.c] = true }))
+    } catch (_) { /* пустой список */ }
+    e.app.store().set("emoji_codes", codes)
+  }
+  if (!codes[code]) throw new NotFoundError()
+  const res = $http.send({ url: `https://fonts.gstatic.com/s/e/notoemoji/latest/${code}/lottie.json`, method: "GET", timeout: 20 })
+  const text = toString(res.body)
+  if (res.statusCode !== 200 || text.charAt(0) !== "{") throw new NotFoundError()
+  try { $os.mkdirAll(dir, 0o755); $os.writeFile(`${dir}/${name}`, text, 0o644) } catch (err) { e.app.logger().warn("emoji cache", "error", String(err)) }
+  return send(text)
+})
+
 // ---------- Уведомления в браузер и на iPhone (Web Push) ----------
 
 // Открытый ключ сервера — браузер подписывается на уведомления с ним.

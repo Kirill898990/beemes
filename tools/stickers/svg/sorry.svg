@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<defs><linearGradient id="y" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE066"/><stop offset="1" stop-color="#FFB300"/></linearGradient><linearGradient id="w" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#CDE9FF"/></linearGradient><clipPath id="b"><ellipse cx="256" cy="250" rx="138" ry="150"/></clipPath></defs>
+<g transform="translate(0 0)">
+
+<ellipse cx="136" cy="150" rx="70" ry="48" transform="rotate(-30 136 150)" fill="url(#w)" stroke="#2E2119" stroke-width="8" opacity=".95"/>
+<ellipse cx="376" cy="150" rx="70" ry="48" transform="rotate(30 376 150)" fill="url(#w)" stroke="#2E2119" stroke-width="8" opacity=".95"/>
+<path d="M222 108 Q206 56 172 44" fill="none" stroke="#2E2119" stroke-width="9" stroke-linecap="round"/><circle cx="168" cy="42" r="14" fill="#2E2119"/>
+<path d="M290 108 Q306 56 340 44" fill="none" stroke="#2E2119" stroke-width="9" stroke-linecap="round"/><circle cx="344" cy="42" r="14" fill="#2E2119"/>
+<path d="M240 392 L256 428 L272 392Z" fill="#2E2119"/>
+<ellipse cx="256" cy="250" rx="138" ry="150" fill="url(#y)"/>
+<g clip-path="url(#b)"><rect x="100" y="300" width="312" height="34" fill="#2E2119"/><rect x="100" y="362" width="312" height="34" fill="#2E2119"/></g>
+<ellipse cx="256" cy="250" rx="138" ry="150" fill="none" stroke="#2E2119" stroke-width="10"/>
+<ellipse cx="206" cy="132" rx="46" ry="22" fill="#fff" opacity=".35" transform="rotate(-18 206 132)"/>
+<ellipse cx="168" cy="226" rx="22" ry="13" fill="#FF7A8A" opacity=".6"/><ellipse cx="344" cy="226" rx="22" ry="13" fill="#FF7A8A" opacity=".6"/>
+<circle cx="206" cy="184" r="24" fill="#fff" stroke="#2E2119" stroke-width="7"/><circle cx="206" cy="190" r="12" fill="#2E2119"/><circle cx="306" cy="184" r="24" fill="#fff" stroke="#2E2119" stroke-width="7"/><circle cx="306" cy="190" r="12" fill="#2E2119"/><path d="M180 140 L228 128" stroke="#2E2119" stroke-width="9" stroke-linecap="round"/><path d="M332 140 L284 128" stroke="#2E2119" stroke-width="9" stroke-linecap="round"/>
+<path d="M222 250 q11 -12 22 0 t22 0 t22 0" fill="none" stroke="#2E2119" stroke-width="9" stroke-linecap="round"/>
+<path d="M156 330 Q186 360 216 368" fill="none" stroke="#2E2119" stroke-width="16" stroke-linecap="round"/><circle cx="216" cy="368" r="20" fill="#FFE066" stroke="#2E2119" stroke-width="7"/>
+<path d="M356 330 Q326 360 296 368" fill="none" stroke="#2E2119" stroke-width="16" stroke-linecap="round"/><circle cx="296" cy="368" r="20" fill="#FFE066" stroke="#2E2119" stroke-width="7"/>
+<path d="M352 110 Q370 140 352 160 Q334 140 352 110Z" fill="#6EC6FF" stroke="#2E2119" stroke-width="6"/>
+</g>
+<text x="256" y="486" text-anchor="middle" font-family="Nunito, 'Arial Rounded MT Bold', Arial, sans-serif" font-weight="900" font-size="58" fill="#fff" stroke="#2E2119" stroke-width="16" stroke-linejoin="round" paint-order="stroke">Прости</text><text x="256" y="486" text-anchor="middle" font-family="Nunito, 'Arial Rounded MT Bold', Arial, sans-serif" font-weight="900" font-size="58" fill="#3D8BFF">Прости</text>
+</svg>

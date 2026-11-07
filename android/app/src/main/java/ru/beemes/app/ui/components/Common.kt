@@ -106,7 +106,9 @@ fun Avatar(user: User, size: Dp = 52.dp, modifier: Modifier = Modifier) {
 /** Анимированный эмодзи (Lottie из набора Noto). */
 @Composable
 fun AnimatedEmoji(code: String, size: Dp, modifier: Modifier = Modifier, play: Boolean = true) {
-    val composition by rememberLottieComposition(LottieCompositionSpec.Asset(Emoji.asset(code)))
+    val composition by rememberLottieComposition(
+        if (Emoji.isBundled(code)) LottieCompositionSpec.Asset(Emoji.asset(code)) else LottieCompositionSpec.Url(Emoji.url(code)),
+    )
     LottieAnimation(
         composition,
         iterations = if (play) LottieConstants.IterateForever else 1,

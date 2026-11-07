@@ -1,7 +1,7 @@
 /* Переписка: сообщения, фото, ответы, правка, живые эмодзи, звонки. */
 import {
   h, icon, iconButton, avatar, nameWithStatus, lastSeenText, isOnline, timeOfDay, dayTitle, richText, bigEmoji, animoji,
-  emojiGroups, popupMenu, modal, toast, disposeEmoji, accentOf, accentVars, titleOf, WALLPAPERS, wallpaperStyle,
+  emojiGroups, popupMenu, modal, toast, disposeEmoji, accentOf, accentVars, titleOf, WALLPAPERS, wallpaperStyle, stickers, stickerUrl,
 } from "../ui.js";
 import * as store from "../store.js";
 import { callTitle, preview } from "./chats.js";
@@ -112,6 +112,16 @@ export function chatView(root, { chatId, go }) {
     const meta = h("span", { class: "meta" }, m.edited ? "изм. " : "", timeOfDay(m.created),
       mine ? (m.status === "sending" ? icon("clock", 14) : m.status === "failed" ? icon("error", 14) : icon(m.status === "read" ? "checks" : "check", 15)) : null);
     let body;
+    if (c && m.kind === "sticker") {
+      const src = stickerUrl(c.st);
+      const art = src ? h("img", { class: "sticker-img", src, alt: (c.e || "") + " Стикер", width: 168, height: 168, loading: "lazy" })
+        : h("div", { class: "big-emoji" }, c.e || "🐝");
+      const el = h("div", { class: "msg-row big sticker" + (mine ? " mine" : ""), "data-id": m.id }, h("div", { class: "sticker-body", tabindex: "0" }, art, meta));
+      const b = el.querySelector(".sticker-body");
+      b.addEventListener("contextmenu", (e) => { e.preventDefault(); messageMenu(m, e.clientX, e.clientY); });
+      b.addEventListener("dblclick", () => setReply(m));
+      return el;
+    }
     if (!c) body = h("span", { class: "undecryptable" }, "🔒 Не удалось расшифровать сообщение");
     else if (big) {
       return h("div", { class: "msg-row big" + (mine ? " mine" : ""), "data-id": m.id },
@@ -306,14 +316,26 @@ export function chatView(root, { chatId, go }) {
     const tabs = h("div", { class: "emoji-tabs", role: "tablist" });
     const show = (gi) => {
       disposeEmoji(grid);
-      tabs.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-selected", i === gi ? "true" : "false"));
+      tabs.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", b.dataset.group === String(gi) ? "true" : "false"));
       grid.replaceChildren(...groups[gi].items.map((it) =>
         h("button", { type: "button", class: "emoji-cell", title: it.e, "aria-label": it.e,
           onclick: () => insert(it.e), ondblclick: () => store.sendText(chatId, it.e).catch(() => {}) }, animoji(it.c, 36, it.e))));
       grid.scrollTop = 0;
     };
-    groups.forEach((g, i) => tabs.append(h("button", { type: "button", role: "tab", onclick: () => show(i) }, g.items[0] ? g.items[0].e + " " : "", g.title)));
-    panel.append(tabs, grid, h("p", { class: "emoji-hint" }, "Щелчок — добавить в сообщение, двойной щелчок — отправить крупно"));
+    const hint = h("p", { class: "emoji-hint" }, "Щелчок — добавить в сообщение, двойной щелчок — отправить крупно");
+    groups.forEach((g, i) => tabs.append(h("button", { type: "button", role: "tab", "data-group": String(i), onclick: () => { hint.textContent = "Щелчок — добавить в сообщение, двойной щелчок — отправить крупно"; show(i); } }, g.items[0] ? g.items[0].e + " " : "", g.title)));
+    // Стикеры — отдельные вкладки (по набору), отправляются сразу.
+    stickers().slice().reverse().forEach((pack) => tabs.prepend(h("button", { type: "button", role: "tab", class: "sticker-tab", onclick: (ev) => {
+      hint.textContent = "Нажмите на стикер — он сразу отправится";
+      disposeEmoji(grid);
+      tabs.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", b === ev.currentTarget ? "true" : "false"));
+      grid.replaceChildren(h("div", { class: "sticker-grid" }, pack.items.map((it) =>
+        h("button", { type: "button", class: "sticker-cell", title: it.t || it.e, "aria-label": "Стикер " + (it.t || it.e),
+          onclick: () => store.sendSticker(chatId, `${pack.id}/${it.id}`, it.e).catch((x) => toast(x.message)) },
+        h("img", { src: `../stickers/${pack.id}/${it.id}.png`, alt: "", width: 96, height: 96, loading: "lazy" })))));
+      grid.scrollTop = 0;
+    } }, "🐝 Стикеры")));
+    panel.append(tabs, grid, hint);
     if (groups.length) show(0);
   }
   function insert(e) {

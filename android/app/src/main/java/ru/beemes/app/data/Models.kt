@@ -129,6 +129,9 @@ data class Content(
     val v: Boolean? = null,
     val d: Int? = null,
     val s: String? = null,
+    /** Стикер: «набор/имя» и его эмодзи. */
+    val st: String? = null,
+    val e: String? = null,
 )
 
 enum class SendStatus { SENDING, SENT, READ, FAILED }
@@ -156,6 +159,7 @@ data class Msg(
         content == null -> "🔒 Сообщение"
         kind == "photo" -> "📷 " + (content.c?.takeIf { it.isNotBlank() } ?: "Фото")
         kind == "call" -> callTitle(mine = false)
+        kind == "sticker" -> listOfNotNull(content.e, "Стикер").joinToString(" ")
         else -> text.replace('\n', ' ')
     }
 

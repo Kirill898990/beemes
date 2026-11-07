@@ -26,6 +26,7 @@ class BeemesApp : Application() {
         repository = Repository(this)
         repo = repository
         Emoji.load(this)
+        ru.beemes.app.data.Stickers.load(this)
         Notifier.createChannels(this)
         // Пока приложение на экране: события сразу (realtime) и «в сети». Свернули или закрыли — сразу «не в сети».
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

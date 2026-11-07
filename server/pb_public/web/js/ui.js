@@ -83,14 +83,28 @@ export const ACCENTS = [
   { key: "mint", title: "Мята", a: "#45E0B0", b: "#119C7A", on: "#221800" },
   { key: "lime", title: "Лайм", a: "#B7EB4A", b: "#3FAE2A", on: "#221800" },
   { key: "graphite", title: "Графит", a: "#8E8AA3", b: "#433E57", on: "#fff" },
+  { key: "cherry", title: "Вишня", a: "#FF6B6B", b: "#C2185B", on: "#fff" },
+  { key: "coral", title: "Коралл", a: "#FFAB91", b: "#FF5E3A", on: "#fff" },
+  { key: "peach", title: "Персик", a: "#FFD3A5", b: "#FD9F6B", on: "#2B1400" },
+  { key: "lemon", title: "Лимон", a: "#FFF27A", b: "#F5B700", on: "#221800" },
+  { key: "forest", title: "Лес", a: "#6BCB77", b: "#1E7B3A", on: "#fff" },
+  { key: "teal", title: "Бирюза", a: "#5EE7DF", b: "#0E8C8C", on: "#04282A" },
+  { key: "sky", title: "Небо", a: "#A1C4FD", b: "#4F8DFD", on: "#0B1A33" },
+  { key: "indigo", title: "Индиго", a: "#8C9EFF", b: "#3949AB", on: "#fff" },
+  { key: "plum", title: "Слива", a: "#D58CFF", b: "#7B1FA2", on: "#fff" },
+  { key: "berry", title: "Ягоды", a: "#FF6FA8", b: "#9C1458", on: "#fff" },
+  { key: "cocoa", title: "Какао", a: "#C69C7B", b: "#6D4C41", on: "#fff" },
+  { key: "midnight", title: "Полночь", a: "#6A5ACD", b: "#1A1446", on: "#fff" },
 ];
+/** Сколько цветов было сначала: тем, кто цвет не выбирал, он подбирается из них (чтобы не поменялся). */
+const FIRST_ACCENTS = 8;
 /** Цвет человека: выбранный в профиле, иначе — по id (у каждого свой). */
 export function accentOf(user) {
   const found = user && ACCENTS.find((x) => x.key === user.accent);
   if (found) return found;
   let hash = 0;
   for (const ch of String((user && user.id) || "")) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
-  return ACCENTS[Math.abs(hash) % ACCENTS.length];
+  return ACCENTS[Math.abs(hash) % FIRST_ACCENTS];
 }
 export const accentVars = (acc) => ({ "--a1": acc.a, "--a2": acc.b, "--on": acc.on });
 
@@ -166,6 +180,20 @@ export async function loadEmoji() {
   sorted = [...byChar.keys()].sort((a, b) => b.length - a.length);
 }
 export const emojiGroups = () => groups;
+
+// ---------- Стикеры ----------
+let stickerPacks = [];
+export async function loadStickers() {
+  try { stickerPacks = await (await fetch("../stickers/index.json")).json(); } catch (_) { stickerPacks = []; }
+}
+export const stickers = () => stickerPacks;
+/** Картинка стикера по «набор/имя» (null — такого нет). */
+export function stickerUrl(st) {
+  if (!/^[a-z0-9]+\/[a-z0-9]+$/.test(st || "")) return null;
+  const [pack, id] = st.split("/");
+  const p = stickerPacks.find((x) => x.id === pack);
+  return p && p.items.some((i) => i.id === id) ? `../stickers/${pack}/${id}.png` : null;
+}
 export const codeOf = (e) => byChar.get(e) || byChar.get(e.replace(/️/g, "")) || null;
 export const statusCode = (v) => (!v ? null : /^[0-9a-f_]+$/.test(v) ? v : codeOf(v));
 export const charOf = (code) => {

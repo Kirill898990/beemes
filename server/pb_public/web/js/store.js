@@ -596,6 +596,8 @@ async function send(chatId, kind, content, replyTo = "", file = null) {
 }
 
 export const sendText = (chatId, text, replyTo = "") => send(chatId, "text", { t: text.trim() }, replyTo);
+/** Стикер из набора: st = "набор/имя", e — его эмодзи (для уведомлений и старых версий приложения). */
+export const sendSticker = (chatId, st, e) => send(chatId, "sticker", { st, e, t: e });
 export const sendCallLog = (chatId, video, seconds, status) => send(chatId, "call", { v: !!video, d: seconds | 0, s: status }).catch(() => {});
 
 /** Фото: уменьшаем до 1600 px, превью 24 px, шифруем своим ключом. */

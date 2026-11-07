@@ -432,6 +432,10 @@ class Repository(private val context: Context) {
         send(chatId, "photo", content, "", blob)
     }
 
+    /** Стикер из набора: st = «набор/имя», e — его эмодзи (его же видят старые версии приложения). */
+    suspend fun sendSticker(chatId: String, st: String, e: String) =
+        send(chatId, "sticker", Content(t = e, st = st, e = e), "", null)
+
     suspend fun sendCallLog(chatId: String, video: Boolean, seconds: Int, status: String) =
         runCatching { send(chatId, "call", Content(v = video, d = seconds, s = status), "", null) }
 

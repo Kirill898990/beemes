@@ -56,25 +56,39 @@ private val Type = Typography(
 )
 
 /** Цвета профиля: каждый выбирает свой — им красится шапка профиля и его «облачка» сообщений. */
-enum class Accent(val key: String, val title: String, val start: Color, val end: Color) {
-    HONEY("honey", "Мёд", Color(0xFFFFC23D), Color(0xFFFF8A00)),
+enum class Accent(val key: String, val title: String, val start: Color, val end: Color, private val darkText: Color? = null) {
+    HONEY("honey", "Мёд", Color(0xFFFFC23D), Color(0xFFFF8A00), Color(0xFF221800)),
     SUNSET("sunset", "Закат", Color(0xFFFF8A5B), Color(0xFFFF3D77)),
     ROSE("rose", "Роза", Color(0xFFFF7AC0), Color(0xFFB84BFF)),
     VIOLET("violet", "Лаванда", Color(0xFFA08CFF), Color(0xFF5B45F0)),
     OCEAN("ocean", "Океан", Color(0xFF4FC3F7), Color(0xFF2F6BFF)),
-    MINT("mint", "Мята", Color(0xFF45E0B0), Color(0xFF119C7A)),
-    LIME("lime", "Лайм", Color(0xFFB7EB4A), Color(0xFF3FAE2A)),
-    GRAPHITE("graphite", "Графит", Color(0xFF8E8AA3), Color(0xFF433E57));
+    MINT("mint", "Мята", Color(0xFF45E0B0), Color(0xFF119C7A), Color(0xFF221800)),
+    LIME("lime", "Лайм", Color(0xFFB7EB4A), Color(0xFF3FAE2A), Color(0xFF221800)),
+    GRAPHITE("graphite", "Графит", Color(0xFF8E8AA3), Color(0xFF433E57)),
+    CHERRY("cherry", "Вишня", Color(0xFFFF6B6B), Color(0xFFC2185B)),
+    CORAL("coral", "Коралл", Color(0xFFFFAB91), Color(0xFFFF5E3A)),
+    PEACH("peach", "Персик", Color(0xFFFFD3A5), Color(0xFFFD9F6B), Color(0xFF2B1400)),
+    LEMON("lemon", "Лимон", Color(0xFFFFF27A), Color(0xFFF5B700), Color(0xFF221800)),
+    FOREST("forest", "Лес", Color(0xFF6BCB77), Color(0xFF1E7B3A)),
+    TEAL("teal", "Бирюза", Color(0xFF5EE7DF), Color(0xFF0E8C8C), Color(0xFF04282A)),
+    SKY("sky", "Небо", Color(0xFFA1C4FD), Color(0xFF4F8DFD), Color(0xFF0B1A33)),
+    INDIGO("indigo", "Индиго", Color(0xFF8C9EFF), Color(0xFF3949AB)),
+    PLUM("plum", "Слива", Color(0xFFD58CFF), Color(0xFF7B1FA2)),
+    BERRY("berry", "Ягоды", Color(0xFFFF6FA8), Color(0xFF9C1458)),
+    COCOA("cocoa", "Какао", Color(0xFFC69C7B), Color(0xFF6D4C41)),
+    MIDNIGHT("midnight", "Полночь", Color(0xFF6A5ACD), Color(0xFF1A1446));
 
     val brush: Brush get() = Brush.linearGradient(listOf(start, end))
 
     /** Текст на этом цвете. */
-    val onColor: Color get() = if (this == HONEY || this == LIME || this == MINT) Color(0xFF221800) else Color.White
+    val onColor: Color get() = darkText ?: Color.White
 
     companion object {
+        /** Сколько цветов было сначала: тем, кто цвет не выбирал, он подбирается из них (чтобы не поменялся). */
+        private const val FIRST = 8
         fun of(key: String) = entries.firstOrNull { it.key == key } ?: HONEY
         /** Если человек не выбрал цвет — подбираем по id, чтобы у разных людей были разные. */
-        fun forUser(key: String, id: String) = entries.firstOrNull { it.key == key } ?: entries[(id.hashCode() and 0x7fffffff) % entries.size]
+        fun forUser(key: String, id: String) = entries.firstOrNull { it.key == key } ?: entries[(id.hashCode() and 0x7fffffff) % FIRST]
     }
 }
 

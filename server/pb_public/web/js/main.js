@@ -1,7 +1,7 @@
 /* beemes в браузере и в приложении для Windows: запуск, раскладка (чаты слева, переписка справа), переходы. */
 import * as store from "./store.js";
 import * as realtime from "./realtime.js";
-import { h, loadEmoji, animoji, icon, disposeEmoji, when } from "./ui.js";
+import { h, loadEmoji, loadStickers, animoji, icon, disposeEmoji, when } from "./ui.js";
 import * as auth from "./views/auth.js";
 import { chatList, search } from "./views/chats.js";
 import { chatView } from "./views/chat.js";
@@ -188,7 +188,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("mess
 });
 
 (async () => {
-  await loadEmoji();
+  await Promise.all([loadEmoji(), loadStickers()]);
   app.classList.remove("boot");
   const signedIn = await store.restore().catch(() => false);
   if (signedIn === "locked") {

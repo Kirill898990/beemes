@@ -34,6 +34,7 @@ class PushService : FirebaseMessagingService() {
                 val text = when {
                     d["kind"] == "photo" -> "📷 " + (content?.c ?: "Фото")
                     d["kind"] == "call" -> "📞 Звонок"
+                    d["kind"] == "sticker" -> listOfNotNull(content?.e, "Стикер").joinToString(" ")
                     content?.t != null -> content.t
                     else -> "Новое сообщение"
                 }

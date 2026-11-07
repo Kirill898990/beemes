@@ -78,7 +78,7 @@ async function decrypt(d) {
 function messageText(kind, c) {
   if (!c) return "Новое сообщение";
   if (kind === "photo") return "📷 " + (c.c || "Фото");
-  if (kind === "sticker") return c.e ? c.e + " Стикер" : "Стикер";
+  if (kind === "sticker") return (c.e ? c.e + " " : "") + "Стикер";
   if (kind === "call") return "Звонок";
   return String(c.t || "Новое сообщение").replace(/\s+/g, " ").slice(0, 300);
 }

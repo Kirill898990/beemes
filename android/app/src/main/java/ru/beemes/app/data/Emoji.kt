@@ -20,8 +20,12 @@ object Emoji {
     private var byChar: Map<String, String> = emptyMap()
     private var sorted: List<String> = emptyList()
 
+    /** Анимации, которые лежат в приложении. Остальные (группы «Ещё …») приложение берёт с сервера beemes. */
+    private var bundled: Set<String> = emptySet()
+
     fun load(context: Context) {
         if (groups.isNotEmpty()) return
+        bundled = runCatching { context.assets.list("emoji")?.map { it.removeSuffix(".json") }?.toSet() }.getOrNull().orEmpty()
         groups = runCatching {
             Json { ignoreUnknownKeys = true }.decodeFromString<List<Group>>(
                 context.assets.open("emoji/index.json").bufferedReader().use { it.readText() },
@@ -37,6 +41,8 @@ object Emoji {
     fun codeOf(emoji: String): String? = byChar[emoji] ?: byChar[emoji.replace("️", "")]
 
     fun asset(code: String) = "emoji/$code.json"
+    fun isBundled(code: String) = code in bundled
+    fun url(code: String) = "${ru.beemes.app.BuildConfig.SERVER_URL.trimEnd('/')}/emoji/$code.json"
 
     /**
      * Кадры, которые крутим по кругу. У некоторых анимаций героиня улетает вдаль (пчела 🐝 большую часть

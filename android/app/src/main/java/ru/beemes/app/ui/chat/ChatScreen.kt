@@ -92,6 +92,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
@@ -286,7 +288,10 @@ fun ChatScreen(
             onFocus = { emojiOpen = false },
         )
         AnimatedVisibility(emojiOpen) {
-            EmojiPanel(onPick = { text += it }, onSendBig = { e -> scope.launch { repo.sendText(chatId, e) } })
+            EmojiPanel(
+                onPick = { text += it }, onSendBig = { e -> scope.launch { repo.sendText(chatId, e) } },
+                onSticker = { st, e -> scope.launch { repo.sendSticker(chatId, st, e) } },
+            )
         }
         if (!emojiOpen) Spacer(Modifier.navigationBarsPadding())
     }
@@ -433,6 +438,8 @@ private fun MessageRow(
     onLongPress: () -> Unit, onPhoto: () -> Unit, onRetry: () -> Unit,
 ) {
     val big = if (m.kind == "text") Emoji.bigEmoji(m.text) else null
+    val sticker = m.kind == "sticker" && m.content != null
+    val bare = big != null || sticker
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         val shape = RoundedCornerShape(20.dp, 20.dp, if (mine) 6.dp else 20.dp, if (mine) 20.dp else 6.dp)
         val onBubble = if (mine) myAccent.onColor else MaterialTheme.colorScheme.onSurface
@@ -441,7 +448,7 @@ private fun MessageRow(
             Modifier.widthIn(max = 300.dp)
                 .combinedClickable(onClick = { if (m.kind == "photo") onPhoto() else if (m.status == SendStatus.FAILED) onRetry() }, onLongClick = onLongPress)
                 .then(
-                    if (big != null) Modifier
+                    if (bare) Modifier
                     else Modifier.clip(shape).background(if (mine) myAccent.brush else Brush.linearGradient(listOf(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.surfaceContainerHigh)))
                         .padding(if (m.kind == "photo") 4.dp else 10.dp),
                 ),
@@ -453,6 +460,7 @@ private fun MessageRow(
                     Icon(Icons.Filled.Lock, null, Modifier.size(16.dp), tint = metaColor)
                     Text(" Не удалось расшифровать", color = metaColor, style = MaterialTheme.typography.bodyMedium)
                 }
+                sticker -> StickerImage(m.content!!)
                 big != null -> Row { big.forEach { AnimatedEmoji(it, if (big.size == 1) 120.dp else if (big.size == 2) 88.dp else 72.dp) } }
                 m.kind == "photo" -> PhotoBubble(repo, m, onBubble)
                 m.kind == "call" -> CallBubble(m, mine, onBubble)
@@ -461,11 +469,11 @@ private fun MessageRow(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 2.dp).then(
-                    if (big != null) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
+                    if (bare) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
                     else if (m.kind == "photo") Modifier.padding(horizontal = 6.dp, vertical = 2.dp) else Modifier,
                 ),
             ) {
-                val color = if (big != null) MaterialTheme.colorScheme.onSurfaceVariant else metaColor
+                val color = if (bare) MaterialTheme.colorScheme.onSurfaceVariant else metaColor
                 if (m.edited) Text("изм. ", fontSize = 11.sp, color = color)
                 Text(timeOfDay(m.created), fontSize = 11.sp, color = color)
                 if (mine) {
@@ -480,6 +488,15 @@ private fun MessageRow(
             }
         }
     }
+}
+
+/** Стикер: картинка из набора, а если такого стикера нет (новый набор) — его эмодзи. */
+@Composable
+private fun StickerImage(c: ru.beemes.app.data.Content) {
+    val context = LocalContext.current
+    val bitmap = remember(c.st) { ru.beemes.app.data.Stickers.image(context, c.st) }
+    if (bitmap != null) Image(bitmap.asImageBitmap(), "${c.e.orEmpty()} Стикер", Modifier.size(150.dp))
+    else Text(c.e ?: "🐝", fontSize = 96.sp)
 }
 
 @Composable
@@ -589,24 +606,46 @@ private fun InputBar(
 private fun Modifier.onFocusGained(block: () -> Unit) = this.onFocusChanged { if (it.isFocused) block() }
 
 @Composable
-private fun EmojiPanel(onPick: (String) -> Unit, onSendBig: (String) -> Unit) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+private fun EmojiPanel(onPick: (String) -> Unit, onSendBig: (String) -> Unit, onSticker: (String, String) -> Unit = { _, _ -> }) {
+    val packs = ru.beemes.app.data.Stickers.packs
+    // Сначала вкладки стикеров, потом группы эмодзи; открываем на смайлах.
+    var tab by rememberSaveable { mutableIntStateOf(packs.size) }
     val groups = Emoji.groups
+    val context = LocalContext.current
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth().height(320.dp).navigationBarsPadding()) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             if (groups.isNotEmpty()) {
-                ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp, containerColor = Color.Transparent, divider = {}) {
+                ScrollableTabRow(selectedTabIndex = tab.coerceIn(0, packs.size + groups.size - 1), edgePadding = 8.dp, containerColor = Color.Transparent, divider = {}) {
+                    packs.forEachIndexed { i, p ->
+                        Tab(selected = tab == i, onClick = { tab = i }, text = { Text("🐝 Стикеры", maxLines = 1) })
+                    }
                     groups.forEachIndexed { i, g ->
-                        Tab(selected = tab == i, onClick = { tab = i }, text = { Text(g.items.firstOrNull()?.e.orEmpty() + " " + g.title, maxLines = 1) })
+                        Tab(selected = tab == packs.size + i, onClick = { tab = packs.size + i }, text = { Text(g.items.firstOrNull()?.e.orEmpty() + " " + g.title, maxLines = 1) })
                     }
                 }
-                LazyVerticalGrid(GridCells.Adaptive(48.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
-                    items(groups[tab].items, key = { it.c }) { item ->
+                if (tab < packs.size) {
+                    val pack = packs[tab]
+                    LazyVerticalGrid(GridCells.Adaptive(92.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
+                        items(pack.items, key = { it.id }) { item ->
+                            val bitmap = remember(item.id) { ru.beemes.app.data.Stickers.image(context, "${pack.id}/${item.id}") }
+                            Box(
+                                Modifier.size(92.dp).clip(RoundedCornerShape(16.dp)).clickable { onSticker("${pack.id}/${item.id}", item.e) }.padding(4.dp)
+                                    .semantics { contentDescription = "Стикер " + item.t.ifBlank { item.e } },
+                                contentAlignment = Alignment.Center,
+                            ) { bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize()) } }
+                        }
+                    }
+                } else {
+                    // Группу берём здесь, а не внутри списка: список перечитывает вкладку раньше, чем панель перерисуется.
+                    val group = groups[(tab - packs.size).coerceIn(0, groups.size - 1)]
+                    LazyVerticalGrid(GridCells.Adaptive(48.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
+                    items(group.items, key = { it.c }) { item ->
                         Box(
                             Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).combinedClickableSafe(onClick = { onPick(item.e) }, onLongClick = { onSendBig(item.e) }),
                             contentAlignment = Alignment.Center,
                         ) { AnimatedEmoji(item.c, 38.dp) }
+                    }
                     }
                 }
             }

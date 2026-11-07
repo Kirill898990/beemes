@@ -11,6 +11,7 @@ export function preview(msg, myId) {
   if (!c) text = "🔒 Не удалось расшифровать";
   else if (msg.kind === "photo") text = "📷 " + (c.c || "Фото");
   else if (msg.kind === "call") text = callTitle(msg, mine);
+  else if (msg.kind === "sticker") text = (c.e ? c.e + " " : "") + "Стикер";
   else text = (c.t || "").replace(/\n/g, " ");
   return (mine && msg.kind !== "call" ? "Вы: " : "") + text;
 }
