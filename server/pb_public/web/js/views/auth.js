@@ -47,10 +47,15 @@ export function login(root, go, done) {
   const pass = field("Пароль", { type: "password", autocomplete: "current-password" });
   const err = h("p", { class: "form-error", role: "alert" });
   const btn = h("button", { type: "submit", class: "btn btn-primary btn-wide" }, "Войти");
+  // 2FA: после верного пароля — код из письма
+  const code = field("Код из письма", { inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code" });
+  code.wrap.hidden = true;
+  const codeNote = h("p", { class: "muted small", hidden: true });
   const form = h("form", { class: "auth-form", novalidate: true },
-    user.wrap, pass.wrap,
+    user.wrap, pass.wrap, codeNote, code.wrap,
     h("p", { class: "muted small" }, "На новом устройстве переписка восстановится: ключ шифрования откроется вашим паролем."),
-    err, btn);
+    err, btn,
+    h("button", { type: "button", class: "btn btn-text btn-wide", onclick: () => go("#/qr-login") }, "Войти по QR-коду с телефона"));
   passwordToggle(pass.input);
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -59,10 +64,16 @@ export function login(root, go, done) {
     btn.disabled = true;
     btn.textContent = "Входим…";
     try {
-      await store.login(user.input.value, pass.input.value);
+      await store.login(user.input.value, pass.input.value, code.wrap.hidden ? "" : code.input.value);
       done();
     } catch (ex) {
-      err.textContent = ex.message || "Не получилось войти";
+      if (ex.twoFactor) {
+        code.wrap.hidden = false;
+        codeNote.hidden = false;
+        codeNote.textContent = `🔐 Включена защита входа: мы отправили код на ${ex.twoFactor}.`;
+        if (code.input.value) err.textContent = "Неверный код";
+        code.input.focus();
+      } else err.textContent = ex.message || "Не получилось войти";
       btn.disabled = false;
       btn.textContent = "Войти";
     }

@@ -1,10 +1,11 @@
 /* Связь с сервером beemes (PocketBase): запросы, файлы, понятные ошибки. */
 
 export class ApiError extends Error {
-  constructor(message, status = 0, fields = {}) {
+  constructor(message, status = 0, fields = {}, raw = {}) {
     super(message);
     this.status = status;
     this.fields = fields;
+    this.raw = raw; // data из ответа сервера как есть (например, twoFactor)
   }
 }
 
@@ -27,10 +28,12 @@ function fieldMessage(field, code) {
 function parseError(status, text) {
   let message = "";
   const fields = {};
+  let raw = {};
   try {
     const obj = JSON.parse(text);
     message = String(obj.message || "");
-    for (const [field, v] of Object.entries(obj.data || {})) fields[field] = fieldMessage(field, v && v.code);
+    raw = obj.data || {};
+    for (const [field, v] of Object.entries(raw)) if (field !== "twoFactor") fields[field] = fieldMessage(field, v && v.code);
   } catch (_) { /* не JSON */ }
   const russian = /[а-яё]/i.test(message) ? message.replace(/\.$/, "") : "";
   const msg = Object.values(fields)[0] || russian ||
@@ -40,7 +43,7 @@ function parseError(status, text) {
           status === 404 ? "Не найдено" :
             status === 429 ? "Слишком много запросов. Подождите минуту." :
               status >= 500 ? "Ошибка на сервере. Попробуйте позже." : `Что-то пошло не так (код ${status})`);
-  return new ApiError(msg, status, fields);
+  return new ApiError(msg, status, fields, raw);
 }
 
 export function url(path, query) {
@@ -49,9 +52,43 @@ export function url(path, query) {
   return u.toString();
 }
 
+// ---------- Сеанс устройства: продлевает вход, если пропуск устарел или сеансы перезапустили ----------
+let session = null; // { id, secret }
+let onRenewed = null;
+export const setSession = (s) => { session = s && s.id && s.secret ? s : null; };
+export const getSession = () => session;
+export const onTokenRenewed = (fn) => { onRenewed = fn; };
+/** Устройство и сеанс — в заголовках (название закодировано: в заголовках нельзя кириллицу). */
+export function deviceHeaders() {
+  const h = {};
+  if (typeof window !== "undefined" && window.beemesDesktop) h["X-BM-Device"] = "windows|" + encodeURIComponent("beemes для Windows");
+  if (session) h["X-BM-Session"] = session.id;
+  return h;
+}
+let renewing = null;
+/** Продлить вход секретом сеанса. → true, если получилось. */
+export function renewToken() {
+  if (!session) return Promise.resolve(false);
+  if (!renewing) {
+    renewing = (async () => {
+      try {
+        const res = await fetch(url("api/bm/session/renew"), {
+          method: "POST", headers: { "Content-Type": "application/json", ...deviceHeaders() }, body: JSON.stringify({ id: session.id, secret: session.secret }),
+        });
+        if (!res.ok) return false;
+        const r = await res.json();
+        token = r.token;
+        if (onRenewed) onRenewed(r);
+        return true;
+      } catch (_) { return false; }
+    })().finally(() => { setTimeout(() => { renewing = null; }, 0); });
+  }
+  return renewing;
+}
+
 /** Запрос к серверу. body — объект (JSON) или FormData (файлы). */
-export async function api(method, path, { body, query, keepalive } = {}) {
-  const headers = {};
+export async function api(method, path, { body, query, keepalive, retried } = {}) {
+  const headers = { ...deviceHeaders() };
   if (token) headers.Authorization = token;
   let payload;
   if (body instanceof FormData) payload = body;
@@ -66,6 +103,10 @@ export async function api(method, path, { body, query, keepalive } = {}) {
     throw new ApiError("Нет связи с сервером. Проверьте интернет.");
   }
   const text = await res.text();
+  // Пропуск больше не действует (истёк или сеансы перезапустили) — продлеваем секретом сеанса и повторяем.
+  if (res.status === 401 && !retried && token && session && !/auth-with-password|session\/renew/.test(path) && await renewToken()) {
+    return api(method, path, { body, query, keepalive, retried: true });
+  }
   if (!res.ok) throw parseError(res.status, text);
   return text ? JSON.parse(text) : {};
 }

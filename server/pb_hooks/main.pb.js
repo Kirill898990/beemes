@@ -144,6 +144,14 @@ routerAdd("POST", "/api/bm/presence", (e) => {
   const state = body.state === "online" ? "online" : "offline"
   const device = String(body.device || "default").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "default"
   const online = presenceUpdate(e.app, auth.id, device, state, Number(body.seq) || 0, 45 * 1000)
+  // Сеанс этого устройства был активен (для списка «Устройства»; пишем не чаще раза в 5 минут).
+  const sid = String(body.session || "").replace(/[^a-z0-9]/g, "")
+  if (sid && !e.app.store().get("touch:" + sid)) {
+    const { iso } = require(`${__hooks}/lib.js`)
+    e.app.store().set("touch:" + sid, Date.now())
+    e.app.db().newQuery("UPDATE sessions SET lastActive = {:t}, ip = {:ip} WHERE id = {:id} AND user = {:u} AND revoked = 0")
+      .bind({ t: iso(Date.now()), ip: e.realIP(), id: sid, u: auth.id }).execute()
+  }
   return e.json(200, { online })
 })
 

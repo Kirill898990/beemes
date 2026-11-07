@@ -4,7 +4,7 @@
  * но достать его байты из браузера нельзя.
  */
 import * as C from "./crypto.js";
-import { ApiError, api, get, post, patch, del, download, setToken, getToken, url } from "./api.js";
+import { ApiError, api, get, post, patch, del, download, setToken, getToken, url, setSession, getSession, onTokenRenewed } from "./api.js";
 
 // ---------- События ----------
 const listeners = new Map();
@@ -123,6 +123,22 @@ function remember(u) {
 /** В приложении для Windows — сразу записать на диск. */
 const flushDesktop = () => { try { if (window.beemesDesktop && window.beemesDesktop.flush) window.beemesDesktop.flush(); } catch (_) { /* ignore */ } };
 
+/** Сеанс этого устройства (id и секрет) — им приложение само продлевает вход. */
+function keepDeviceSession(sess) {
+  if (!sess || !sess.id || !sess.secret) return;
+  setSession(sess);
+  ls.set("bm_session", JSON.stringify(sess));
+}
+// Вход продлили секретом сеанса — запоминаем новый пропуск.
+onTokenRenewed((r) => {
+  ls.set("bm_token", r.token);
+  if (r.record && state.me && r.record.id === state.me.id) {
+    state.me = { ...state.me, ...r.record };
+    ls.set("bm_me", JSON.stringify(state.me));
+  }
+  flushDesktop();
+});
+
 function saveSession(token, me) {
   setToken(token);
   state.me = me;
@@ -144,6 +160,7 @@ export async function restore() {
   const token = ls.get("bm_token");
   const meRaw = ls.get("bm_me");
   if (!token || !meRaw) return false;
+  try { setSession(JSON.parse(ls.get("bm_session") || "null")); } catch (_) { /* без сеанса */ }
   try {
     state.me = JSON.parse(meRaw);
   } catch (_) {
@@ -157,6 +174,8 @@ export async function restore() {
   try {
     const r = await post("api/collections/users/auth-refresh");
     saveSession(r.token, r.record);
+    // вошли до появления сеансов — заводим сеанс этого устройства
+    if (!getSession()) keepDeviceSession(await post("api/bm/session/create").catch(() => null));
   } catch (e) {
     if (e.status === 401 || e.status === 404) { await logout(); return false; }
     // нет сети — работаем с сохранённым
@@ -178,11 +197,18 @@ export async function register(name, username, password) {
   await login_(login, password);
 }
 
-async function login_(username, password) {
+async function login_(username, password, code = "") {
   const login = username.trim().toLowerCase().replace(/^@/, "");
-  const auth = await api("POST", "api/collections/users/auth-with-password", {
-    body: { identity: login, password: await C.authPassword(login, password) },
-  });
+  let auth;
+  try {
+    auth = await api("POST", "api/collections/users/auth-with-password", {
+      body: { identity: login, password: await C.authPassword(login, password), ...(code ? { code: code.trim() } : {}) },
+    });
+  } catch (e) {
+    // 2FA: пароль верный, нужен код из письма
+    if (e.raw && e.raw.twoFactor) { const err = new ApiError("Введите код из письма"); err.twoFactor = String(e.raw.twoFactor.message || "вашу почту").replace(/\.$/, "").toLowerCase(); throw err; }
+    throw e;
+  }
   setToken(auth.token);
   let raw;
   try {
@@ -195,6 +221,7 @@ async function login_(username, password) {
   }
   state.privateKey = await storeKey(raw);
   raw.fill(0);
+  keepDeviceSession(auth.meta && auth.meta.session);
   saveSession(auth.token, auth.record);
 }
 export { login_ as login };
@@ -218,6 +245,11 @@ export async function unlock(password) {
 export async function logout() {
   await presence("offline");
   await disablePush().catch(() => {});
+  // закрыть сеанс этого устройства (остальные устройства не трогаем)
+  const sess = getSession();
+  if (sess) await post(`api/bm/sessions/${sess.id}/end`).catch(() => {});
+  setSession(null);
+  ls.del("bm_session");
   setToken("");
   ls.del("bm_token");
   ls.del("bm_me");
@@ -296,6 +328,60 @@ export async function deleteAccount() {
 /** Пробное уведомление на мои телефоны → отчёт сервера. */
 export const pushTest = () => post("api/bm/push-test");
 
+// ---------- Устройства, вход по QR-коду, почта и 2FA ----------
+
+export const sessions = () => get("api/bm/sessions").then((r) => r.items);
+export const endSession = (id) => post(`api/bm/sessions/${id}/end`);
+export const endOtherSessions = () => post("api/bm/sessions/end-others");
+
+/** Новое устройство: QR для входа. → { id, link, poll(): «ждём» / вошли }. */
+export async function qrLoginStart() {
+  const eph = await C.newIdentity();
+  const r = await post("api/bm/qr/start", { pub: C.b64(eph.publicKey) });
+  const link = `${location.origin}/web/#/qr/${r.id}/${C.b64url(eph.publicKey)}`;
+  async function poll() {
+    const res = await post(`api/bm/qr/${r.id}/poll`, { secret: r.secret });
+    if (!res.token) return res.status; // "pending" | "declined"
+    const q = res.meta && res.meta.qr;
+    const raw = await C.qrOpen(eph.privateKey, q.e2pub, r.id, q.body, q.nonce);
+    if (C.b64(await C.publicFromPrivate(raw)) !== res.record.publicKey) throw new ApiError("Ключ не подошёл — попробуйте ещё раз");
+    setToken(res.token);
+    state.privateKey = await storeKey(raw);
+    raw.fill(0);
+    keepDeviceSession(res.meta.session);
+    saveSession(res.token, res.record);
+    return "done";
+  }
+  return { id: r.id, link, expiresIn: r.expiresIn, poll };
+}
+
+export const qrInfo = (id) => get(`api/bm/qr/${id}`);
+export const qrDecline = (id) => post(`api/bm/qr/${id}/decline`);
+/** Подтвердить вход на новом устройстве: передаём ключ переписки зашифрованным для ключа из QR. */
+export async function qrApprove(id, pubB64url) {
+  const raw = await loadRaw();
+  if (!raw || raw.length !== 32) throw new ApiError("В этом браузере ключ переписки защищён и передать его нельзя. Подтвердите вход в приложении beemes на телефоне.");
+  const sealed = await C.qrSeal(C.unb64url(pubB64url), id, new Uint8Array(raw));
+  await post(`api/bm/qr/${id}/approve`, sealed);
+}
+export const canApproveQr = async () => { const r = await loadRaw(); return !!(r && r.length === 32); };
+
+export const emailStart = (email) => post("api/bm/email/start", { email });
+export async function emailConfirm(code) {
+  const r = await post("api/bm/email/confirm", { code });
+  saveSession(r.token, r.record);
+  return r.meta && r.meta.email;
+}
+export async function emailRemove(password) {
+  const r = await post("api/bm/email/remove", { password: await C.authPassword(state.me.username, password) });
+  saveSession(r.token, r.record);
+}
+export async function setTwoFactor(enabled, password) {
+  await post("api/bm/2fa", { enabled, password: await C.authPassword(state.me.username, password) });
+  const r = await post("api/collections/users/auth-refresh");
+  saveSession(r.token, r.record);
+}
+
 // ---------- Уведомления, когда beemes закрыт (Web Push: браузер и iPhone) ----------
 
 /** iPhone или iPad (там любой браузер — Safari внутри). */
@@ -350,7 +436,7 @@ let presenceSeq = 0;
 export function presence(state, closing = false) {
   if (!state || !getToken()) return Promise.resolve();
   presenceSeq = Math.max(presenceSeq + 1, Date.now());
-  const body = { state, device: deviceId(), seq: presenceSeq };
+  const body = { state, device: deviceId(), seq: presenceSeq, session: (getSession() || {}).id || "" };
   if (closing && navigator.sendBeacon) {
     try {
       const sent = navigator.sendBeacon(url("api/bm/presence"), new Blob([JSON.stringify({ ...body, token: getToken() })], { type: "application/json" }));

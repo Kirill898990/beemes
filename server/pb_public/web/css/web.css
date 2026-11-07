@@ -430,3 +430,10 @@ textarea.input { resize: vertical; min-height: 70px; }
 [hidden] { display: none !important; }
 .link-like { border: none; background: none; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; display: grid; }
 .link-like:hover .name { text-decoration: underline; }
+
+/* ---------- Устройства и QR ---------- */
+.device-ic { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; background: var(--primary-soft); color: var(--on-primary-soft); flex: none; }
+.danger-text { color: var(--danger); }
+.qr-box { display: grid; justify-items: center; gap: 12px; }
+.qr-box svg { width: min(260px, 70vw); height: auto; box-shadow: var(--shadow); border-radius: 18px; }
+.qr-steps { text-align: left; margin: 4px 0; padding-left: 22px; display: grid; gap: 4px; }

@@ -53,6 +53,8 @@ export function menu(root, { go, route }) {
         row("phone", "Проверить уведомления на телефоне", "Пришлём пробное уведомление и скажем, если что-то не так", pushTest)),
       h("h3", {}, "Безопасность"),
       h("div", { class: "card" },
+        row("phone", "Устройства", "Где вы вошли, вход по QR-коду", () => go("#/settings/devices"), active("devices")),
+        row("shield", "Почта и 2FA", "Код из письма при входе", () => go("#/settings/security"), active("security")),
         row("key", "Сменить пароль", "Ключ шифрования перешифруется новым паролем", () => go("#/settings/password"), active("password")),
         row("block", "Заблокированные", null, () => go("#/settings/blocked"), active("blocked"))),
       h("div", { class: "card" },

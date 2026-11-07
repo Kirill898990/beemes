@@ -125,6 +125,29 @@ export async function unwrapGroupKey(privateKey, fromPublic, chatId, epoch, user
   return gcm(false, await groupWrapKey(privateKey, fromPublic, chatId, epoch), unb64(nonce), unb64(body), groupAad(chatId, epoch, userId));
 }
 export const groupKey = (raw) => aesKey(raw, ["encrypt", "decrypt"]);
+// ---------- Вход по QR-коду ----------
+// Новое устройство показывает в QR свой временный открытый ключ. Телефон шифрует для него ключ переписки:
+// X25519(временный ключ телефона, ключ из QR) → HKDF(соль «qr|id») → AES-GCM. Сервер только передаёт шифр.
+const QR_INFO = enc.encode("beemes-qr-v1");
+async function qrKey(privateKey, theirPublic, id) {
+  const priv = privateKey instanceof Uint8Array ? await importPrivate(privateKey) : privateKey;
+  const pub = await subtle.importKey("raw", theirPublic, { name: "X25519" }, false, []);
+  const shared = await subtle.deriveBits({ name: "X25519", public: pub }, priv, 256);
+  const hk = await subtle.importKey("raw", shared, "HKDF", false, ["deriveBits"]);
+  return aesKey(new Uint8Array(await subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: enc.encode("qr|" + id), info: QR_INFO }, hk, 256)), ["encrypt", "decrypt"]);
+}
+/** Телефон: зашифровать ключ переписки raw для устройства с ключом theirPublic. */
+export async function qrSeal(theirPublic, id, raw) {
+  const e2 = await newIdentity();
+  const nonce = randomBytes(12);
+  const body = await gcm(true, await qrKey(e2.privateKey, theirPublic, id), nonce, raw, enc.encode(id));
+  return { e2pub: b64(e2.publicKey), body: b64(body), nonce: b64(nonce) };
+}
+/** Новое устройство: расшифровать ключ переписки своим временным ключом. */
+export async function qrOpen(myPrivate, e2pub, id, body, nonce) {
+  return gcm(false, await qrKey(myPrivate, unb64(e2pub), id), unb64(nonce), unb64(body), enc.encode(id));
+}
+
 export const b64url = (bytes) => b64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 export const unb64url = (text) => unb64(text.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((text.length + 3) % 4));
 

@@ -8,6 +8,7 @@ import { chatView } from "./views/chat.js";
 import { peerProfile, safety } from "./views/profile.js";
 import * as settings from "./views/settings.js";
 import { newGroup, groupInfo, joinView, channelLink } from "./views/groups.js";
+import * as devicesView from "./views/devices.js";
 import { checkIncoming, askNotify, canNotify } from "./calls.js";
 
 const app = document.getElementById("app");
@@ -51,14 +52,15 @@ function route() {
   const [a = "", b = "", c3 = ""] = location.hash.replace(/^#\/?/, "").split("/");
   if (!store.state.me) {
     // Приглашение открыли, не войдя, — после входа вернёмся к нему.
-    if (a === "join" || a === "c") { try { sessionStorage.setItem("bm_after_login", location.hash); } catch (_) { /* ignore */ } }
+    if (a === "join" || a === "c" || a === "qr") { try { sessionStorage.setItem("bm_after_login", location.hash); } catch (_) { /* ignore */ } }
+    if (a === "qr-login") { devicesView.qrLogin(app, go, onSignedIn); return; }
     if (layout) { layout.sideOff && layout.sideOff(); layout.paneOff && layout.paneOff(); layout = null; }
     if (a === "login") auth.login(app, go, onSignedIn);
     else if (a === "register") auth.register(app, go, onSignedIn);
     else auth.welcome(app, go);
     return;
   }
-  if (["welcome", "login", "register"].includes(a)) { go("#/"); return; }
+  if (["welcome", "login", "register", "qr-login"].includes(a)) { go("#/"); return; }
   const L = ensureLayout();
   currentChat = a === "chat" ? b : null;
 
@@ -73,7 +75,7 @@ function route() {
   } else if (sideKey === "chats") store.emit("chats");
 
   const paneKey = a === "chat" && b ? "chat:" + b : a === "user" && b ? "user:" + b : a === "safety" && b ? "safety:" + b : a === "settings" && b ? "settings:" + b
-    : a === "group" && b ? "group:" + b : a === "join" && b ? "join:" + b + ":" + c3 : a === "c" && b ? "c:" + b : "empty";
+    : a === "group" && b ? "group:" + b : a === "join" && b ? "join:" + b + ":" + c3 : a === "c" && b ? "c:" + b : a === "qr" && b ? "qr:" + b + ":" + c3 : "empty";
   if (paneKey !== L.paneKey) {
     if (L.paneOff) L.paneOff();
     const [kind, id] = paneKey.split(":");
@@ -81,9 +83,10 @@ function route() {
       : kind === "group" ? groupInfo(L.pane, { chatId: id, go })
       : kind === "join" ? joinView(L.pane, { code: id, key: c3, go })
       : kind === "c" ? channelLink(L.pane, { handle: id, go })
+      : kind === "qr" ? devicesView.qrApprove(L.pane, { id, pub: c3, go })
       : kind === "user" ? peerProfile(L.pane, { userId: id, go })
         : kind === "safety" ? safety(L.pane, { chatId: id, go })
-          : kind === "settings" ? ({ profile: settings.myProfile, password: settings.password, blocked: settings.blockedList, about: settings.about }[id] || emptyPane)(L.pane, { go })
+          : kind === "settings" ? ({ profile: settings.myProfile, password: settings.password, blocked: settings.blockedList, about: settings.about, devices: devicesView.devices, security: devicesView.security }[id] || emptyPane)(L.pane, { go })
             : emptyPane(L.pane);
     L.paneKey = paneKey;
   }
