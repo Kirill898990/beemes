@@ -1,5 +1,5 @@
 /* Профиль собеседника и код безопасности. */
-import { h, icon, iconButton, avatar, nameWithStatus, lastSeenText, isOnline, accentOf, accentVars, animoji, modal, toast, titleOf, disposeEmoji } from "../ui.js";
+import { h, icon, iconButton, avatar, nameWithStatus, lastSeenText, isOnline, accentOf, accentVars, withPattern, animoji, modal, toast, titleOf, disposeEmoji } from "../ui.js";
 import * as store from "../store.js";
 import * as C from "../crypto.js";
 import { startCall } from "../calls.js";
@@ -17,7 +17,7 @@ export function peerProfile(root, { userId, go }) {
     pane.replaceChildren(
       h("div", { class: "profile-head", style: accentVars(acc) },
         iconButton("back", "Назад", () => history.length > 1 ? history.back() : go("#/"), { class: "on-color" }),
-        h("div", { class: "profile-hero" }, avatar(u, 132), h("h1", {}, nameWithStatus(u, 30)),
+        h("div", { class: "profile-hero" }, withPattern(avatar(u, 132), u.bgEmoji), h("h1", {}, nameWithStatus(u, 30)),
           h("p", {}, u.username ? "@" + u.username : "", u.username ? " · " : "", h("span", { class: isOnline(u) ? "online" : "" }, lastSeenText(u))))),
       h("div", { class: "profile-body" },
         h("div", { class: "quick-actions" },

@@ -164,13 +164,13 @@ class Repository(private val context: Context) {
         ).items.onEach { remember(it) }
     }
 
-    suspend fun updateProfile(name: String, bio: String, accent: String, statusEmoji: String, hideLastSeen: Boolean) {
+    suspend fun updateProfile(name: String, bio: String, accent: String, statusEmoji: String, hideLastSeen: Boolean, bgEmoji: String = _me.value?.bgEmoji.orEmpty()) {
         val me = _me.value ?: return
         val updated = api.send(
             "PATCH", "api/collections/users/records/${me.id}", User.serializer(),
             buildJsonObject {
                 put("name", name.trim()); put("bio", bio.trim()); put("accent", accent)
-                put("statusEmoji", statusEmoji); put("hideLastSeen", hideLastSeen)
+                put("statusEmoji", statusEmoji); put("hideLastSeen", hideLastSeen); put("bgEmoji", bgEmoji)
             },
         )
         saveSession(token!!, updated)

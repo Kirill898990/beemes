@@ -260,7 +260,7 @@ textarea.input { resize: vertical; min-height: 70px; }
 
 /* ---------- Профиль и настройки ---------- */
 .profile-pane { flex: 1; overflow-y: auto; min-height: 0; }
-.profile-head { position: relative; padding: 14px 14px 26px; background: linear-gradient(160deg, var(--a1), var(--a2)); color: var(--on); }
+.profile-head { position: relative; overflow: hidden; padding: 14px 14px 26px; background: linear-gradient(160deg, var(--a1), var(--a2)); color: var(--on); }
 .profile-hero { display: grid; justify-items: center; text-align: center; gap: 4px; }
 .profile-hero h1 { margin: 10px 0 0; font-size: 28px; }
 .profile-hero p { margin: 0; opacity: 0.85; }
@@ -394,3 +394,17 @@ textarea.input { resize: vertical; min-height: 70px; }
 .sticker-cell:hover, .sticker-cell:focus-visible { background: var(--chip); }
 .sticker-cell:active img { transform: scale(0.94); }
 .emoji-grid > .sticker-grid { grid-column: 1 / -1; }
+
+/* ---------- Узор из эмодзи и свой градиент ---------- */
+.avatar-zone { position: relative; display: inline-flex; }
+.avatar-zone > :not(.profile-pattern) { position: relative; z-index: 1; }
+.profile-pattern { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+.profile-pattern span { position: absolute; transform: translate(-50%, -50%); line-height: 1; filter: brightness(0) invert(var(--pi, 1)); user-select: none; }
+.accent.custom { background: conic-gradient(from 200deg, #ff5e8a, #ffb25b, #fff27a, #45e0b0, #4fc3f7, #7d5cff, #ff5e8a); display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 22px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45); }
+.accent.custom[aria-checked="true"] { background: linear-gradient(135deg, var(--a1), var(--a2)); }
+.accent.custom[aria-checked="true"]::after { content: none; }
+.gradient-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 18px; background: var(--c1); }
+.gradient-editor label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.gradient-editor input[type="color"] { width: 44px; height: 36px; border: 2px solid var(--line); border-radius: 10px; padding: 2px; background: var(--surface); cursor: pointer; }
+.gradient-editor .swatch { flex: 1; min-width: 120px; height: 36px; border-radius: 12px; background: linear-gradient(135deg, var(--a1), var(--a2)); color: var(--on); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+.pattern-preview { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(135deg, var(--a1), var(--a2)); font-size: 24px; }

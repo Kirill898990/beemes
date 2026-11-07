@@ -434,7 +434,7 @@ private fun EmptyChat(peer: User?, onSend: (String) -> Unit) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
-    repo: Repository, m: Msg, mine: Boolean, myAccent: Accent, peer: User?, reply: Msg?,
+    repo: Repository, m: Msg, mine: Boolean, myAccent: ru.beemes.app.ui.theme.Palette, peer: User?, reply: Msg?,
     onLongPress: () -> Unit, onPhoto: () -> Unit, onRetry: () -> Unit,
 ) {
     val big = if (m.kind == "text") Emoji.bigEmoji(m.text) else null

@@ -9,6 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -83,13 +85,33 @@ enum class Accent(val key: String, val title: String, val start: Color, val end:
     /** Текст на этом цвете. */
     val onColor: Color get() = darkText ?: Color.White
 
+    val palette: Palette get() = Palette(key, start, end, onColor)
+
     companion object {
         /** Сколько цветов было сначала: тем, кто цвет не выбирал, он подбирается из них (чтобы не поменялся). */
         private const val FIRST = 8
-        fun of(key: String) = entries.firstOrNull { it.key == key } ?: HONEY
+        private val CUSTOM = Regex("^g:#([0-9a-fA-F]{6}):#([0-9a-fA-F]{6})$")
+
+        /** Готовый цвет или свой градиент «g:#RRGGBB:#RRGGBB». */
+        fun of(key: String): Palette = custom(key) ?: (entries.firstOrNull { it.key == key } ?: HONEY).palette
+
         /** Если человек не выбрал цвет — подбираем по id, чтобы у разных людей были разные. */
-        fun forUser(key: String, id: String) = entries.firstOrNull { it.key == key } ?: entries[(id.hashCode() and 0x7fffffff) % FIRST]
+        fun forUser(key: String, id: String): Palette =
+            custom(key) ?: (entries.firstOrNull { it.key == key } ?: entries[(id.hashCode() and 0x7fffffff) % FIRST]).palette
+
+        fun custom(key: String): Palette? = CUSTOM.matchEntire(key)?.let { m ->
+            val a = Color(0xFF000000 or m.groupValues[1].toLong(16))
+            val b = Color(0xFF000000 or m.groupValues[2].toLong(16))
+            Palette(key.lowercase(), a, b, if ((a.luminance() + b.luminance()) / 2 > 0.35f) Color(0xFF1B1626) else Color.White)
+        }
+
+        fun customKey(a: Color, b: Color) = "g:#%06x:#%06x".format(a.toArgb() and 0xFFFFFF, b.toArgb() and 0xFFFFFF)
     }
+}
+
+/** Цвет профиля: два цвета градиента и цвет текста на нём. */
+data class Palette(val key: String, val start: Color, val end: Color, val onColor: Color) {
+    val brush: Brush get() = Brush.linearGradient(listOf(start, end))
 }
 
 val LocalDark = staticCompositionLocalOf { true }

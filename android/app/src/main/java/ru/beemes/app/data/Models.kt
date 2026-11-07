@@ -18,6 +18,8 @@ data class User(
     val avatar: String = "",
     val accent: String = "",
     val statusEmoji: String = "",
+    /** Узор из эмодзи на фоне шапки профиля (код Noto). */
+    val bgEmoji: String = "",
     val publicKey: String = "",
     val lastSeen: String = "",
     /** «В сети» до этого момента: приложение сообщает серверу, когда его открыли и когда свернули. */

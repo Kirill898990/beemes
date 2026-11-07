@@ -1,5 +1,5 @@
 /* Настройки: мой профиль, оформление, уведомления, пароль, заблокированные, выход и удаление аккаунта. */
-import { h, icon, iconButton, avatar, nameWithStatus, ACCENTS, accentOf, accentVars, animoji, emojiGroups, statusCode, modal, toast, disposeEmoji, titleOf } from "../ui.js";
+import { h, icon, iconButton, avatar, nameWithStatus, ACCENTS, accentOf, accentVars, customAccent, withPattern, charOf, animoji, emojiGroups, statusCode, modal, toast, disposeEmoji, titleOf } from "../ui.js";
 import * as store from "../store.js";
 import { askNotify, canNotify, messageSound } from "../calls.js";
 
@@ -135,6 +135,7 @@ export function myProfile(root, { go }) {
   const me = store.state.me;
   let accent = me.accent || accentOf(me).key;
   let status = me.statusEmoji || "";
+  let bgEmoji = me.bgEmoji || "";
   const name = h("input", { class: "input", value: me.name || "", maxlength: 64, autocomplete: "name" });
   const bio = h("textarea", { class: "input", rows: 3, maxlength: 200 }, me.bio || "");
   const counter = h("small", { class: "muted" }, `${(me.bio || "").length}/200`);
@@ -143,7 +144,7 @@ export function myProfile(root, { go }) {
   const hide = h("input", { type: "checkbox", class: "switch", checked: !!me.hideLastSeen, "aria-label": "Скрывать, когда я был(а) в сети" });
   const fileInput = h("input", { type: "file", accept: "image/*", hidden: true });
   const head = h("div", { class: "profile-head" });
-  const preview = () => ({ ...store.state.me, name: name.value, accent, statusEmoji: status });
+  const preview = () => ({ ...store.state.me, name: name.value, accent, statusEmoji: status, bgEmoji });
   function renderHead() {
     disposeEmoji(head);
     const p = preview();
@@ -151,13 +152,31 @@ export function myProfile(root, { go }) {
     head.replaceChildren(
       iconButton("back", "Назад", () => go("#/settings"), { class: "on-color only-narrow" }),
       h("div", { class: "profile-hero" },
-        h("button", { type: "button", class: "avatar-edit", "aria-label": "Сменить фото", onclick: () => fileInput.click() }, avatar(store.state.me, 132), h("span", { class: "avatar-cam" }, icon("camera", 22))),
+        withPattern(h("button", { type: "button", class: "avatar-edit", "aria-label": "Сменить фото", onclick: () => fileInput.click() }, avatar(store.state.me, 132), h("span", { class: "avatar-cam" }, icon("camera", 22))), bgEmoji),
         h("h1", {}, nameWithStatus(p, 30)), h("p", {}, "@" + p.username)));
   }
   const accents = h("div", { class: "accents", role: "radiogroup", "aria-label": "Цвет профиля" });
-  const renderAccents = () => accents.replaceChildren(...ACCENTS.map((a) =>
-    h("button", { type: "button", role: "radio", class: "accent", "aria-label": a.title, title: a.title, "aria-checked": a.key === accent ? "true" : "false", style: accentVars(a),
-      onclick: () => { accent = a.key; renderAccents(); renderHead(); } })));
+  // Свой градиент: два цвета на выбор.
+  const isCustom = () => accent.startsWith("g:");
+  const c1 = h("input", { type: "color", "aria-label": "Первый цвет градиента" });
+  const c2 = h("input", { type: "color", "aria-label": "Второй цвет градиента" });
+  const swatch = h("span", { class: "swatch" }, "Так будет выглядеть");
+  const editor = h("div", { class: "gradient-editor", hidden: true }, h("label", {}, "Начало", c1), h("label", {}, "Конец", c2), swatch);
+  const fromInputs = () => { accent = customAccent(c1.value, c2.value).key; renderAccents(); renderHead(); };
+  c1.oninput = fromInputs; c2.oninput = fromInputs;
+  const renderAccents = () => {
+    accents.replaceChildren(...ACCENTS.map((a) =>
+      h("button", { type: "button", role: "radio", class: "accent", "aria-label": a.title, title: a.title, "aria-checked": a.key === accent ? "true" : "false", style: accentVars(a),
+        onclick: () => { accent = a.key; editor.hidden = true; renderAccents(); renderHead(); } })),
+    h("button", { type: "button", role: "radio", class: "accent custom", "aria-label": "Свой градиент", title: "Свой градиент", "aria-checked": isCustom() ? "true" : "false",
+      style: isCustom() ? accentVars(accentOf({ accent })) : null,
+      onclick: () => {
+        if (!isCustom()) { const cur = accentOf(preview()); c1.value = cur.a.toLowerCase(); c2.value = cur.b.toLowerCase(); accent = customAccent(c1.value, c2.value).key; }
+        editor.hidden = false; renderAccents(); renderHead();
+      } }, isCustom() ? null : "+"));
+    Object.entries(accentVars(accentOf({ accent }))).forEach(([k, v]) => swatch.style.setProperty(k, v));
+  };
+  if (isCustom()) { const cur = accentOf({ accent }); c1.value = cur.a; c2.value = cur.b; editor.hidden = false; }
   const statusBox = h("div", { class: "status-box" });
   const renderStatus = () => {
     disposeEmoji(statusBox);
@@ -167,11 +186,20 @@ export function myProfile(root, { go }) {
       h("button", { type: "button", class: "btn btn-text", onclick: pickStatus }, code ? "Сменить" : "Выбрать"),
       code ? h("button", { type: "button", class: "btn btn-text", onclick: () => { status = ""; renderStatus(); renderHead(); } }, "Убрать") : null);
   };
-  function pickStatus() {
+  function pickEmoji(title, onPick) {
     const grid = h("div", { class: "emoji-grid tall" }, emojiGroups().flatMap((g) => g.items).map((it) =>
-      h("button", { type: "button", class: "emoji-cell", "aria-label": it.e, onclick: () => { status = it.c; renderStatus(); renderHead(); dlg.close(); } }, animoji(it.c, 36, it.e))));
-    const dlg = modal("Эмодзи-статус", grid, [{ label: "Закрыть" }], { class: "wide", onclose: () => disposeEmoji(grid) });
+      h("button", { type: "button", class: "emoji-cell", "aria-label": it.e, onclick: () => { onPick(it.c); dlg.close(); } }, animoji(it.c, 36, it.e))));
+    const dlg = modal(title, grid, [{ label: "Закрыть" }], { class: "wide", onclose: () => disposeEmoji(grid) });
   }
+  const pickStatus = () => pickEmoji("Эмодзи-статус", (c) => { status = c; renderStatus(); renderHead(); });
+  // Узор из эмодзи на фоне шапки профиля
+  const patternBox = h("div", { class: "status-box" });
+  const renderPattern = () => {
+    patternBox.replaceChildren(h("span", { class: "status-preview pattern-preview", style: accentVars(accentOf({ accent })) }, bgEmoji ? charOf(bgEmoji) : "✨"),
+      h("span", {}, h("b", {}, "Узор на фоне профиля"), h("small", {}, "Эмодзи вокруг аватара в шапке профиля")),
+      h("button", { type: "button", class: "btn btn-text", onclick: () => pickEmoji("Узор на фоне профиля", (c) => { bgEmoji = c; renderPattern(); renderHead(); }) }, bgEmoji ? "Сменить" : "Выбрать"),
+      bgEmoji ? h("button", { type: "button", class: "btn btn-text", onclick: () => { bgEmoji = ""; renderPattern(); renderHead(); } }, "Убрать") : null);
+  };
   fileInput.onchange = async () => {
     const f = fileInput.files[0];
     fileInput.value = "";
@@ -195,7 +223,7 @@ export function myProfile(root, { go }) {
     if (!name.value.trim()) { err.textContent = "Впишите имя"; return; }
     save.disabled = true;
     try {
-      await store.updateProfile({ name: name.value.trim(), bio: bio.value.trim(), accent, statusEmoji: status, hideLastSeen: hide.checked });
+      await store.updateProfile({ name: name.value.trim(), bio: bio.value.trim(), accent, statusEmoji: status, bgEmoji, hideLastSeen: hide.checked });
       toast("Сохранено");
     } catch (e) { err.textContent = e.message; }
     save.disabled = false;
@@ -204,13 +232,13 @@ export function myProfile(root, { go }) {
     h("div", { class: "profile-body form" },
       h("label", { class: "field" }, h("span", { class: "field-label" }, "Имя"), name),
       h("label", { class: "field" }, h("span", { class: "field-label" }, "О себе"), bio, counter),
-      h("h3", {}, "Цвет профиля"), accents, h("p", { class: "muted small" }, "Им красятся ваши сообщения и шапка профиля."),
-      statusBox,
+      h("h3", {}, "Цвет профиля"), accents, editor, h("p", { class: "muted small" }, "Им красятся ваши сообщения и шапка профиля. «+» — свой градиент из двух цветов."),
+      statusBox, patternBox,
       h("label", { class: "row-item card" }, h("span", {}, h("b", {}, "Скрывать, когда я был(а) в сети"), h("small", {}, "Собеседники увидят «был(а) недавно»")), hide),
       store.state.me.avatar ? h("button", { type: "button", class: "btn btn-text", onclick: async () => { await store.setAvatar(null).catch((e) => toast(e.message)); renderHead(); } }, "Убрать фото профиля") : null,
       err, save));
   root.replaceChildren(pane);
-  renderHead(); renderAccents(); renderStatus();
+  renderHead(); renderAccents(); renderStatus(); renderPattern();
   return () => disposeEmoji(pane);
 }
 

@@ -98,15 +98,43 @@ export const ACCENTS = [
 ];
 /** Сколько цветов было сначала: тем, кто цвет не выбирал, он подбирается из них (чтобы не поменялся). */
 const FIRST_ACCENTS = 8;
+const luminance = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+/** Свой градиент из двух цветов; текст на нём — тёмный или белый, смотря что лучше читается. */
+export const customAccent = (a, b) => ({ key: `g:${a}:${b}`, title: "Свой градиент", a, b, on: (luminance(a) + luminance(b)) / 2 > 0.35 ? "#1B1626" : "#fff" });
 /** Цвет человека: выбранный в профиле, иначе — по id (у каждого свой). */
 export function accentOf(user) {
+  const custom = /^g:(#[0-9a-fA-F]{6}):(#[0-9a-fA-F]{6})$/.exec((user && user.accent) || "");
+  if (custom) return customAccent(custom[1].toLowerCase(), custom[2].toLowerCase());
   const found = user && ACCENTS.find((x) => x.key === user.accent);
   if (found) return found;
   let hash = 0;
   for (const ch of String((user && user.id) || "")) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
   return ACCENTS[Math.abs(hash) % FIRST_ACCENTS];
 }
-export const accentVars = (acc) => ({ "--a1": acc.a, "--a2": acc.b, "--on": acc.on });
+export const accentVars = (acc) => ({ "--a1": acc.a, "--a2": acc.b, "--on": acc.on, "--pi": acc.on === "#fff" ? 1 : 0 });
+
+// Узор из эмодзи вокруг аватара в шапке профиля (как в Telegram): силуэты цвета текста,
+// ближе к аватару — крупнее и заметнее. Координаты — от центра аватара.
+const PATTERN = [
+  [-112, -44, 30, 0.34], [112, -44, 30, 0.34], [-122, 40, 27, 0.32], [122, 40, 27, 0.32], [-74, -98, 24, 0.3], [74, -98, 24, 0.3],
+  [-80, 98, 22, 0.28], [80, 98, 22, 0.28], [0, -132, 20, 0.24], [-190, -86, 22, 0.24], [190, -86, 22, 0.24], [-198, 4, 24, 0.24],
+  [198, 4, 24, 0.24], [-186, 92, 20, 0.22], [186, 92, 20, 0.22], [-140, -140, 18, 0.2], [140, -140, 18, 0.2], [-268, -44, 18, 0.16],
+  [268, -44, 18, 0.16], [-262, 58, 16, 0.15], [262, 58, 16, 0.15], [-330, -112, 15, 0.12], [330, -112, 15, 0.12], [-336, 6, 15, 0.12],
+  [336, 6, 15, 0.12], [-330, 118, 14, 0.1], [330, 118, 14, 0.1], [-410, -60, 13, 0.08], [410, -60, 13, 0.08], [-404, 70, 13, 0.08], [404, 70, 13, 0.08],
+];
+/** Аватар (или кнопка с ним) с узором из эмодзи вокруг. code — код эмодзи (bgEmoji), пусто — без узора. */
+export function withPattern(avatarEl, code) {
+  if (!code) return avatarEl;
+  const ch = charOf(code);
+  return h("div", { class: "avatar-zone" },
+    h("div", { class: "profile-pattern", "aria-hidden": "true" }, PATTERN.map(([x, y, size, o]) =>
+      h("span", { style: { left: x + "px", top: y + "px", "font-size": size + "px", opacity: o } }, ch))),
+    avatarEl);
+}
 
 export const titleOf = (u) => (u && (u.name || (u.username ? "@" + u.username : ""))) || "Без имени";
 
