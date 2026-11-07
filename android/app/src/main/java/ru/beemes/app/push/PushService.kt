@@ -28,8 +28,10 @@ class PushService : FirebaseMessagingService() {
                 // Чат открыт на экране — уведомление не нужно (сообщение придёт само).
                 if (app.inForeground && repo.openChatId == chatId) return
                 if (!repo.notificationsEnabled) return
+                val group = !d["chatType"].isNullOrBlank()
                 val content = d["body"]?.takeIf { it.isNotBlank() }?.let {
-                    repo.decryptPush(chatId, d["sender"].orEmpty(), d["senderKey"].orEmpty(), it, d["nonce"].orEmpty())
+                    if (group) repo.decryptGroupPush(d)
+                    else repo.decryptPush(chatId, d["sender"].orEmpty(), d["senderKey"].orEmpty(), it, d["nonce"].orEmpty())
                 }
                 val text = when {
                     d["kind"] == "photo" -> "📷 " + (content?.c ?: "Фото")
@@ -38,7 +40,10 @@ class PushService : FirebaseMessagingService() {
                     content?.t != null -> content.t
                     else -> "Новое сообщение"
                 }
-                Notifier.message(this, chatId, d["senderName"].orEmpty(), text, quiet = d["silent"] == "1")
+                // Группа: название группы, «Алиса: текст»; канал: название и текст поста.
+                val title = if (group) d["chatTitle"].orEmpty().ifBlank { "beemes" } else d["senderName"].orEmpty()
+                val body = if (d["chatType"] == "group") "${d["senderName"].orEmpty()}: $text" else text
+                Notifier.message(this, chatId, title, body, quiet = d["silent"] == "1")
                 if (app.inForeground) repo.scope.launch { runCatching { repo.refreshChats() } }
             }
             "call" -> {

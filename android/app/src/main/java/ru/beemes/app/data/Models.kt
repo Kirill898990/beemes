@@ -57,7 +57,29 @@ data class MessageRecord(
     val replyTo: String = "",
     val editedAt: String = "",
     val created: String = "",
+    /** Эпоха ключа группы (0 — личный чат или публичный канал). */
+    val epoch: Int = 0,
 )
+
+/** Ключ группы, зашифрованный лично для меня (chat_keys). */
+@Serializable
+data class ChatKey(val id: String = "", val chat: String = "", val user: String = "", val epoch: Int = 0, val from: String = "", val body: String = "", val nonce: String = "")
+
+/** Группа/канал до вступления (приглашение, поиск). */
+@Serializable
+data class GroupPreview(
+    val id: String = "", val type: String = "", val title: String = "", val about: String = "", val photo: String = "",
+    val isPublic: Boolean = false, val handle: String = "", val membersCount: Int = 0, val joined: Boolean = false,
+)
+
+/** Участник группы (для «О группе»). */
+@Serializable
+data class GroupMember(
+    val id: String = "", val username: String = "", val name: String = "", val avatar: String = "", val accent: String = "",
+    val statusEmoji: String = "", val publicKey: String = "", val admin: Boolean = false, val owner: Boolean = false, val hasKey: Boolean = false,
+) {
+    fun toUser() = User(id = id, username = username, name = name, avatar = avatar, accent = accent, statusEmoji = statusEmoji, publicKey = publicKey)
+}
 
 @Serializable
 data class ChatExpand(val members: List<User> = emptyList(), val lastMessage: MessageRecord? = null)
@@ -70,7 +92,37 @@ data class Chat(
     val lastMessage: String = "",
     val created: String = "",
     val expand: ChatExpand? = null,
-)
+    // Группы и каналы (у личного чата type пустой)
+    val type: String = "",
+    val title: String = "",
+    val about: String = "",
+    val photo: String = "",
+    val owner: String = "",
+    val admins: List<String> = emptyList(),
+    val isPublic: Boolean = false,
+    val handle: String = "",
+    val inviteCode: String = "",
+    val openKey: String = "",
+    val keyEpoch: Int = 0,
+    val membersCount: Int = 0,
+    /** Я в группе (сервер отвечает для групп; у личного чата не важно). */
+    val joined: Boolean = true,
+) {
+    val isGroup: Boolean get() = type.isNotBlank()
+    val isChannel: Boolean get() = type == "channel"
+    /** Эпоха, которой шифруются новые сообщения. */
+    val sendEpoch: Int get() = if (isPublic) 0 else keyEpoch
+    fun isAdmin(userId: String) = owner == userId || userId in admins
+    /** «3 участника», «канал · 120 подписчиков». */
+    val subtitle: String get() {
+        val n = if (membersCount > 0) membersCount else members.size
+        return if (isChannel) "${if (isPublic) "публичный канал" else "канал"} · $n ${plural(n, "подписчик", "подписчика", "подписчиков")}"
+        else "$n ${plural(n, "участник", "участника", "участников")}"
+    }
+}
+
+fun plural(n: Int, one: String, few: String, many: String) =
+    if (n % 10 == 1 && n % 100 != 11) one else if (n % 10 in 2..4 && (n % 100 < 12 || n % 100 > 14)) few else many
 
 @Serializable
 data class ChatState(
@@ -99,6 +151,9 @@ data class Keys(val publicKey: String = "", val encKey: String = "", val keySalt
 
 @Serializable
 data class UnreadResponse(val unread: Map<String, Int> = emptyMap())
+
+@Serializable
+data class PostsResponse(val items: List<MessageRecord> = emptyList(), val more: Boolean = false)
 
 @Serializable
 data class UsernameCheck(val free: Boolean = false, val reason: String = "")
@@ -149,6 +204,7 @@ data class Msg(
     val edited: Boolean = false,
     val file: String = "",
     val replyTo: String = "",
+    val epoch: Int = 0,
     val status: SendStatus = SendStatus.SENT,
     /** Для неотправленных: локальный id, чтобы заменить на настоящий. */
     val localId: String = "",

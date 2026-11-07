@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        openChat.value = intent.getStringExtra(Notifier.EXTRA_CHAT)?.takeIf { it.isNotBlank() }
+        openChat.value = intent.getStringExtra(Notifier.EXTRA_CHAT)?.takeIf { it.isNotBlank() } ?: linkOf(intent)
         setContent {
             var theme by androidx.compose.runtime.remember { mutableStateOf(app.repository.theme) }
             val dark = when (theme) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
@@ -41,8 +41,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra(Notifier.EXTRA_CHAT)?.takeIf { it.isNotBlank() }?.let { openChat.value = it }
+        (intent.getStringExtra(Notifier.EXTRA_CHAT)?.takeIf { it.isNotBlank() } ?: linkOf(intent))?.let { openChat.value = it }
     }
+
+    /** Открыли ссылку beemes (приглашение в группу или канал). */
+    private fun linkOf(intent: Intent): String? =
+        intent.data?.takeIf { intent.action == Intent.ACTION_VIEW }?.toString()?.takeIf { "#/join/" in it || "#/c/" in it }?.let { "link:$it" }
 
     /** Чат, который нужно открыть (нажали на уведомление). */
     val openChat = MutableStateFlow<String?>(null)

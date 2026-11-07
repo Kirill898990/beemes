@@ -146,4 +146,22 @@ object Crypto {
 
     private val KEY_AAD = "beemes-key-v1".toByteArray()
     private val CHAT_INFO = "beemes-chat-v1".toByteArray()
+    private val GROUP_INFO = "beemes-group-key-v1".toByteArray()
+
+    // ---------- Группы и каналы ----------
+    // Ключ группы — 32 случайных байта (у каждой эпохи свой). Участнику он передаётся зашифрованным лично для него:
+    // X25519(от кого, кому) → HKDF(соль «group|чат|эпоха») → AES-GCM. Так же делают сайт (crypto.js) и тесты сервера.
+    fun newGroupKey(): ByteArray = randomBytes(32)
+
+    private fun groupWrapKey(myPrivate: ByteArray, theirPublic: ByteArray, chatId: String, epoch: Int): ByteArray =
+        Hkdf.computeHkdf("HMACSHA256", X25519.computeSharedSecret(myPrivate, theirPublic), "group|$chatId|$epoch".toByteArray(), GROUP_INFO, 32)
+
+    fun wrapGroupKey(myPrivate: ByteArray, theirPublic: ByteArray, chatId: String, epoch: Int, userId: String, raw: ByteArray): Sealed =
+        seal(groupWrapKey(myPrivate, theirPublic, chatId, epoch), raw, "$chatId|$epoch|$userId")
+
+    fun unwrapGroupKey(myPrivate: ByteArray, fromPublic: ByteArray, chatId: String, epoch: Int, userId: String, body: String, nonce: String): ByteArray =
+        open(groupWrapKey(myPrivate, fromPublic, chatId, epoch), body, nonce, "$chatId|$epoch|$userId")
+
+    fun b64url(bytes: ByteArray) = b64(bytes).replace('+', '-').replace('/', '_').trimEnd('=')
+    fun unb64url(text: String) = unb64(text.replace('-', '+').replace('_', '/').let { it + "=".repeat((4 - it.length % 4) % 4) })
 }

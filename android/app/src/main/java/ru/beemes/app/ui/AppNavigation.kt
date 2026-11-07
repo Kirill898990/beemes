@@ -86,7 +86,9 @@ private fun MainFlow(app: BeemesApp, openChat: MutableStateFlow<String?>, onThem
     LaunchedEffect(pendingChat) {
         val id = pendingChat ?: return@LaunchedEffect
         openChat.value = null
-        nav.navigate("chat/$id") {
+        // Ссылка-приглашение (открыли из браузера/мессенджера) или чат из уведомления.
+        if (id.startsWith("link:")) nav.navigate("join/" + android.net.Uri.encode(id.removePrefix("link:"))) { launchSingleTop = true }
+        else nav.navigate("chat/$id") {
             popUpTo("chats")
             launchSingleTop = true
         }
@@ -122,10 +124,32 @@ private fun MainFlow(app: BeemesApp, openChat: MutableStateFlow<String?>, onThem
                 onOpenChat = { nav.navigate("chat/$it") { launchSingleTop = true } },
                 onSearch = { nav.navigate("search") },
                 onSettings = { nav.navigate("settings") },
+                onNewGroup = { nav.navigate("new/$it") },
             )
         }
         composable("search") {
-            SearchScreen(repo, onBack = { nav.back() }, onOpenProfile = { nav.navigate("profile/$it") })
+            SearchScreen(
+                repo, onBack = { nav.back() }, onOpenProfile = { nav.navigate("profile/$it") },
+                onOpenChat = { nav.navigate("chat/$it") { launchSingleTop = true } },
+                onInvite = { nav.navigate("join/" + android.net.Uri.encode(it)) },
+            )
+        }
+        composable("new/{type}") { entry ->
+            ru.beemes.app.ui.groups.NewGroupScreen(repo, entry.arguments?.getString("type").orEmpty(), onBack = { nav.back() },
+                onCreated = { id -> nav.navigate("chat/$id") { popUpTo("chats"); launchSingleTop = true } })
+        }
+        composable("group/{id}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            ru.beemes.app.ui.groups.GroupInfoScreen(
+                repo, id, onBack = { nav.back() },
+                onOpenChat = { chatId -> if (!nav.popBackStack("chat/{id}", inclusive = false)) nav.navigate("chat/$chatId") { popUpTo("chats"); launchSingleTop = true } },
+                onOpenProfile = { nav.navigate("profile/$it") },
+                onLeft = { nav.popBackStack("chats", inclusive = false) },
+            )
+        }
+        composable("join/{link}") { entry ->
+            ru.beemes.app.ui.groups.JoinScreen(repo, android.net.Uri.decode(entry.arguments?.getString("link").orEmpty()), onBack = { nav.back() },
+                onJoined = { id -> nav.navigate("chat/$id") { popUpTo("chats"); launchSingleTop = true } })
         }
         composable("chat/{id}") { entry ->
             val chatId = entry.arguments?.getString("id").orEmpty()
@@ -134,6 +158,7 @@ private fun MainFlow(app: BeemesApp, openChat: MutableStateFlow<String?>, onThem
                 onBack = { nav.back() },
                 onOpenProfile = { nav.navigate("profile/$it") { launchSingleTop = true } },
                 onCall = { video -> call(chatId, video) },
+                onOpenGroup = { nav.navigate("group/$it") { launchSingleTop = true } },
             )
         }
         composable("profile/{id}") { entry ->

@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
@@ -148,10 +149,13 @@ fun ChatScreen(
     onBack: () -> Unit,
     onOpenProfile: (String) -> Unit,
     onCall: (video: Boolean) -> Unit,
+    onOpenGroup: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val messages by repo.messages(chatId).collectAsState()
+    // Группа или канал (у личного чата — null)
+    var group by remember { mutableStateOf(repo.chatItem(chatId)?.chat?.takeIf { it.isGroup }) }
     val users by repo.users.collectAsState()
     val me by repo.me.collectAsState()
     var peerId by remember { mutableStateOf(repo.chatItem(chatId)?.peer?.id.orEmpty()) }
@@ -179,8 +183,13 @@ fun ChatScreen(
     LaunchedEffect(chatId) {
         runCatching {
             val c = repo.chat(chatId)
-            peerId = repo.peerOf(c)
-            repo.user(peerId, fresh = true)
+            if (c.isGroup) {
+                group = repo.reloadChat(chatId)
+                launch { runCatching { repo.healGroupKeys(group!!) } }
+            } else {
+                peerId = repo.peerOf(c)
+                repo.user(peerId, fresh = true)
+            }
             hasMore = repo.loadMessages(chatId)
         }.onFailure { error = it.message }
     }
@@ -235,10 +244,11 @@ fun ChatScreen(
     val myAccent = Accent.forUser(me?.accent.orEmpty(), me?.id.orEmpty())
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()) {
         ChatTopBar(
-            peer, onBack, { peer?.let { onOpenProfile(it.id) } }, onCall,
+            peer, onBack, { group?.let { onOpenGroup(it.id) } ?: peer?.let { onOpenProfile(it.id) } }, onCall,
             muted = muted,
             onWallpaper = { wallpaperOpen = true },
             onMute = { scope.launch { runCatching { repo.setMuted(chatId, !muted) }.onFailure { error = it.message } } },
+            group = group,
         )
         Box(Modifier.weight(1f).fillMaxWidth()) {
             ChatWallpaper(repo, chatId, wallpaper, Modifier.fillMaxSize())
@@ -259,6 +269,7 @@ fun ChatScreen(
                             val mine = m.senderId == me?.id
                             MessageRow(
                                 repo, m, mine, myAccent, peer,
+                                author = if (group != null && !group!!.isChannel && !mine) users[m.senderId] ?: User(id = m.senderId, name = "…") else null,
                                 reply = m.replyTo.takeIf { it.isNotBlank() }?.let { r -> messages.firstOrNull { it.id == r } },
                                 onLongPress = { menuFor = m },
                                 onPhoto = { viewer = m },
@@ -268,14 +279,29 @@ fun ChatScreen(
                     }
                 }
                 if (loadingMore) item { Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) } }
-                item { EncryptionNote() }
+                item { EncryptionNote(group) }
             }
         }
         error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             LaunchedEffect(it) { delay(4000); error = null }
         }
-        InputBar(
+        val g = group
+        val readOnly = g != null && (!g.joined || (g.isChannel && !g.isAdmin(me?.id.orEmpty())))
+        if (readOnly) {
+            // Подписчик канала не пишет: «подписаться» или «без звука»
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+                Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), contentAlignment = Alignment.Center) {
+                    if (!g!!.joined) androidx.compose.material3.Button(
+                        onClick = { scope.launch { runCatching { group = repo.joinPublic(chatId) }.onFailure { error = it.message } } },
+                        shape = RoundedCornerShape(18.dp),
+                    ) { Text(if (g.isChannel) "Подписаться" else "Вступить", fontWeight = FontWeight.Bold) }
+                    else androidx.compose.material3.TextButton(onClick = { scope.launch { runCatching { repo.setMuted(chatId, !muted) } } }) {
+                        Text(if (muted) "Включить уведомления" else "Выключить уведомления")
+                    }
+                }
+            }
+        } else InputBar(
             text = text, onText = { text = it },
             replyTo = replyTo, editing = editing, peer = peer, myId = me?.id.orEmpty(),
             emojiOpen = emojiOpen,
@@ -293,7 +319,7 @@ fun ChatScreen(
                 onSticker = { st, e -> scope.launch { repo.sendSticker(chatId, st, e) } },
             )
         }
-        if (!emojiOpen) Spacer(Modifier.navigationBarsPadding())
+        if (!emojiOpen && !readOnly) Spacer(Modifier.navigationBarsPadding())
     }
 
     menuFor?.let { m ->
@@ -355,6 +381,7 @@ private fun buildItems(messages: List<Msg>): List<Item> {
 private fun ChatTopBar(
     peer: User?, onBack: () -> Unit, onProfile: () -> Unit, onCall: (Boolean) -> Unit,
     muted: Boolean = false, onWallpaper: () -> Unit = {}, onMute: () -> Unit = {},
+    group: ru.beemes.app.data.Chat? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, shadowElevation = 2.dp) {
@@ -363,7 +390,13 @@ private fun ChatTopBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
-            Row(Modifier.weight(1f).clickable(onClick = onProfile), verticalAlignment = Alignment.CenterVertically) {
+            if (group != null) Row(Modifier.weight(1f).clickable(onClick = onProfile), verticalAlignment = Alignment.CenterVertically) {
+                ru.beemes.app.ui.groups.GroupAvatar(group.id, group.isChannel, 40.dp)
+                Column(Modifier.padding(start = 10.dp)) {
+                    ru.beemes.app.ui.groups.GroupTitle(group.title, group.isChannel)
+                    Text(group.subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
+            } else Row(Modifier.weight(1f).clickable(onClick = onProfile), verticalAlignment = Alignment.CenterVertically) {
                 if (peer != null) Avatar(peer, 40.dp)
                 Column(Modifier.padding(start = 10.dp)) {
                     if (peer != null) NameWithStatus(peer, MaterialTheme.typography.titleMedium, emojiSize = 18.dp)
@@ -372,11 +405,17 @@ private fun ChatTopBar(
                     Text(status, style = MaterialTheme.typography.bodyMedium, color = if (peer?.onlineAt(now) == true) Online else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
             }
-            IconButton(onClick = { onCall(true) }) { Icon(Icons.Filled.Videocam, "Видеозвонок") }
-            IconButton(onClick = { onCall(false) }) { Icon(Icons.Filled.Call, "Позвонить") }
+            if (group == null) {
+                IconButton(onClick = { onCall(true) }) { Icon(Icons.Filled.Videocam, "Видеозвонок") }
+                IconButton(onClick = { onCall(false) }) { Icon(Icons.Filled.Call, "Позвонить") }
+            }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Ещё") }
                 androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (group != null) androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(if (group.isChannel) "О канале" else "О группе") }, leadingIcon = { Icon(Icons.Filled.Info, null) },
+                        onClick = { menu = false; onProfile() },
+                    )
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text("Фон чата") }, leadingIcon = { Icon(Icons.Filled.Palette, null) },
                         onClick = { menu = false; onWallpaper() },
@@ -403,7 +442,7 @@ private fun DayChip(title: String) {
 }
 
 @Composable
-private fun EncryptionNote() {
+private fun EncryptionNote(group: ru.beemes.app.data.Chat? = null) {
     Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
         Row(
             Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f), RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
@@ -411,7 +450,12 @@ private fun EncryptionNote() {
         ) {
             Icon(Icons.Filled.Lock, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
             Text(
-                "  Сообщения и фото зашифрованы на телефонах. Прочитать их можете только вы двое.",
+                "  " + when {
+                    group == null -> "Сообщения и фото зашифрованы на телефонах. Прочитать их можете только вы двое."
+                    group.isPublic -> "Публичный канал: посты видит любой, кто его найдёт."
+                    group.isChannel -> "Посты зашифрованы. Прочитать их могут только подписчики канала."
+                    else -> "Сообщения зашифрованы. Прочитать их могут только участники группы."
+                },
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }
@@ -434,7 +478,9 @@ private fun EmptyChat(peer: User?, onSend: (String) -> Unit) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
-    repo: Repository, m: Msg, mine: Boolean, myAccent: ru.beemes.app.ui.theme.Palette, peer: User?, reply: Msg?,
+    repo: Repository, m: Msg, mine: Boolean, myAccent: ru.beemes.app.ui.theme.Palette, peer: User?,
+    author: User? = null,
+    reply: Msg?,
     onLongPress: () -> Unit, onPhoto: () -> Unit, onRetry: () -> Unit,
 ) {
     val big = if (m.kind == "text") Emoji.bigEmoji(m.text) else null
@@ -454,6 +500,8 @@ private fun MessageRow(
                 ),
             horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
         ) {
+            // в группе — имя автора над сообщением (цветом его профиля)
+            if (author != null && !bare) Text(author.title, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = Accent.forUser(author.accent, author.id).end, maxLines = 1)
             if (reply != null) ReplyQuote(reply, mine, onBubble, peer)
             when {
                 m.content == null -> Row(verticalAlignment = Alignment.CenterVertically) {

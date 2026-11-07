@@ -95,9 +95,9 @@ enum class Accent(val key: String, val title: String, val start: Color, val end:
         /** Готовый цвет или свой градиент «g:#RRGGBB:#RRGGBB». */
         fun of(key: String): Palette = custom(key) ?: (entries.firstOrNull { it.key == key } ?: HONEY).palette
 
-        /** Если человек не выбрал цвет — подбираем по id, чтобы у разных людей были разные. */
+        /** Если человек не выбрал цвет — подбираем по id (так же, как сайт: |хэш| % 8), чтобы у разных людей были разные. */
         fun forUser(key: String, id: String): Palette =
-            custom(key) ?: (entries.firstOrNull { it.key == key } ?: entries[(id.hashCode() and 0x7fffffff) % FIRST]).palette
+            custom(key) ?: (entries.firstOrNull { it.key == key } ?: entries[(kotlin.math.abs(id.hashCode().toLong()) % FIRST).toInt()]).palette
 
         fun custom(key: String): Palette? = CUSTOM.matchEntire(key)?.let { m ->
             val a = Color(0xFF000000 or m.groupValues[1].toLong(16))
