@@ -14,3 +14,10 @@ fun Context.openUrl(url: String) {
         Toast.makeText(this, "Нет браузера, чтобы открыть ссылку", Toast.LENGTH_SHORT).show()
     }
 }
+
+/** Короткое сообщение внизу экрана — с любого потока (после сетевого запроса тоже). */
+fun Context.toast(text: String?) {
+    if (text.isNullOrBlank()) return
+    val ctx = applicationContext
+    android.os.Handler(android.os.Looper.getMainLooper()).post { Toast.makeText(ctx, text, Toast.LENGTH_SHORT).show() }
+}

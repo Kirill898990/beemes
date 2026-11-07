@@ -193,8 +193,10 @@ private fun MainFlow(app: BeemesApp, openChat: MutableStateFlow<String?>, onThem
                 onSchool = { nav.navigate("school") },
                 onDevices = { nav.navigate("devices") },
                 onSecurity = { nav.navigate("security") },
+                onAdmin = { nav.navigate("admin") },
             )
         }
+        composable("admin") { ru.beemes.app.ui.profile.AdminScreen(repo, onBack = { nav.back() }) }
         composable("devices") {
             ru.beemes.app.ui.profile.DevicesScreen(repo, onBack = { nav.back() }, onQr = { nav.navigate("qr/" + android.net.Uri.encode(it)) })
         }

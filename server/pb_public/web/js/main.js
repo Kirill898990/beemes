@@ -9,6 +9,7 @@ import { peerProfile, safety } from "./views/profile.js";
 import * as settings from "./views/settings.js";
 import { newGroup, groupInfo, joinView, channelLink } from "./views/groups.js";
 import * as devicesView from "./views/devices.js";
+import { admin as adminView } from "./views/admin.js";
 import { checkIncoming, askNotify, canNotify } from "./calls.js";
 
 const app = document.getElementById("app");
@@ -86,7 +87,7 @@ function route() {
       : kind === "qr" ? devicesView.qrApprove(L.pane, { id, pub: c3, go })
       : kind === "user" ? peerProfile(L.pane, { userId: id, go })
         : kind === "safety" ? safety(L.pane, { chatId: id, go })
-          : kind === "settings" ? ({ profile: settings.myProfile, password: settings.password, blocked: settings.blockedList, about: settings.about, devices: devicesView.devices, security: devicesView.security }[id] || emptyPane)(L.pane, { go })
+          : kind === "settings" ? ({ profile: settings.myProfile, password: settings.password, blocked: settings.blockedList, about: settings.about, devices: devicesView.devices, security: devicesView.security, admin: adminView }[id] || emptyPane)(L.pane, { go })
             : emptyPane(L.pane);
     L.paneKey = paneKey;
   }

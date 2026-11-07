@@ -51,7 +51,7 @@ function preview(app, chat, uid) {
   return {
     id: chat.id, type: chat.getString("type"), title: chat.getString("title"), about: chat.getString("about"),
     photo: chat.getString("photo"), isPublic: chat.getBool("isPublic"), handle: chat.getString("handle"),
-    membersCount: chat.getInt("membersCount"), joined: isMember(chat, uid),
+    membersCount: chat.getInt("membersCount"), joined: isMember(chat, uid), badge: chat.getBool("badge"),
   }
 }
 

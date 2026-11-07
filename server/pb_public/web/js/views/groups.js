@@ -1,5 +1,5 @@
 /* Группы и каналы: создание, «О группе» (участники, админы, ссылка), вступление по приглашению. */
-import { h, icon, iconButton, avatar, nameWithStatus, groupAvatar, groupTitle, groupSubtitle, modal, toast, disposeEmoji, titleOf, animoji, popupMenu } from "../ui.js";
+import { h, icon, iconButton, avatar, nameWithStatus, squareJpeg, groupAvatar, groupTitle, groupSubtitle, modal, toast, disposeEmoji, titleOf, animoji, popupMenu } from "../ui.js";
 import * as store from "../store.js";
 
 /** Люди, с которыми есть личные чаты, — из них выбираем участников. */
@@ -63,6 +63,14 @@ export function groupInfo(root, { chatId, go }) {
   let c = null;
   let members = null;
   const me = store.state.me;
+  // Фото группы/канала — меняют админы
+  const photoInput = h("input", { type: "file", accept: "image/*", hidden: true });
+  photoInput.onchange = async () => {
+    const f = photoInput.files[0];
+    photoInput.value = "";
+    if (!f) return;
+    try { c = await store.setGroupPhoto(c.id, await squareJpeg(f)); render(); toast("Фото обновлено"); } catch (e) { toast(e.message || "Не получилось загрузить фото"); }
+  };
   const render = () => {
     disposeEmoji(pane);
     const admin = store.isAdminOf(c);
@@ -71,7 +79,10 @@ export function groupInfo(root, { chatId, go }) {
     pane.replaceChildren(
       h("div", { class: "profile-head", style: { "--a1": "#7D5CFF", "--a2": "#FF5E8A", "--on": "#fff" } },
         iconButton("back", "Назад", () => history.length > 1 ? history.back() : go(`#/chat/${c.id}`), { class: "on-color" }),
-        h("div", { class: "profile-hero" }, groupAvatar(c, 132), h("h1", {}, groupTitle(c, 26)), h("p", {}, groupSubtitle(c) + (c.handle ? " · @" + c.handle : "")))),
+        h("div", { class: "profile-hero" },
+          admin ? h("button", { type: "button", class: "avatar-edit", "aria-label": "Сменить фото", onclick: () => photoInput.click() }, groupAvatar(c, 132), h("span", { class: "avatar-cam" }, icon("camera", 22)))
+            : groupAvatar(c, 132),
+          photoInput, h("h1", {}, groupTitle(c, 26)), h("p", {}, groupSubtitle(c) + (c.handle ? " · @" + c.handle : "")))),
       h("div", { class: "profile-body" },
         h("div", { class: "quick-actions" },
           h("button", { type: "button", onclick: () => go(`#/chat/${c.id}`) }, icon("chat"), c.type === "channel" ? "Читать" : "Написать"),
@@ -80,6 +91,10 @@ export function groupInfo(root, { chatId, go }) {
         c.about ? h("section", { class: "section" }, h("h3", {}, "Описание"), h("div", { class: "card pad" }, c.about)) : null,
         admin ? h("section", { class: "section" }, h("h3", {}, "Настройки"), h("div", { class: "card" },
           h("button", { type: "button", class: "row-item", onclick: edit }, icon("edit"), h("span", {}, h("b", {}, "Название и описание"))),
+          h("button", { type: "button", class: "row-item", onclick: () => photoInput.click() }, icon("camera"),
+            h("span", {}, h("b", {}, c.photo ? "Сменить фото" : "Поставить фото"), h("small", {}, c.type === "channel" ? "Аватарка канала — видна всем подписчикам" : "Аватарка группы — видна всем участникам"))),
+          c.photo ? h("button", { type: "button", class: "row-item", onclick: async () => { try { c = await store.setGroupPhoto(c.id, null); render(); toast("Фото убрано"); } catch (e) { toast(e.message); } } },
+            icon("delete_forever"), h("span", {}, h("b", {}, "Убрать фото"))) : null,
           !c.isPublic ? h("button", { type: "button", class: "row-item", onclick: async () => { try { c = await store.newInvite(c.id); render(); toast("Старая ссылка больше не работает"); } catch (e) { toast(e.message); } } },
             icon("link"), h("span", {}, h("b", {}, "Новая ссылка-приглашение"), h("small", {}, "Старая перестанет работать"))) : null)) : null,
         members ? h("section", { class: "section" }, h("h3", {}, c.type === "channel" ? `Подписчики (${members.length})` : `Участники (${members.length})`),

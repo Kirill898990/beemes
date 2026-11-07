@@ -197,7 +197,7 @@ private fun ChatRow(item: ChatItem, myId: String, onClick: () -> Unit, onLongCli
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box {
-            if (group) GroupAvatar(item.chat.id, item.chat.isChannel, 56.dp) else Avatar(item.peer, 56.dp)
+            if (group) GroupAvatar(item.chat.id, item.chat.isChannel, 56.dp, photo = item.chat.photo) else Avatar(item.peer, 56.dp)
             val now by PresenceClock.now.collectAsState()
             if (!group && item.peer.onlineAt(now)) {
                 Box(
@@ -207,7 +207,7 @@ private fun ChatRow(item: ChatItem, myId: String, onClick: () -> Unit, onLongCli
         }
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (group) GroupTitle(item.chat.title, item.chat.isChannel, Modifier.weight(1f))
+                if (group) GroupTitle(item.chat.title, item.chat.isChannel, Modifier.weight(1f), badge = item.chat.badge)
                 else NameWithStatus(item.peer, MaterialTheme.typography.titleMedium, Modifier.weight(1f), emojiSize = 18.dp)
                 if (item.muted) Icon(Icons.AutoMirrored.Filled.VolumeOff, "Без звука", Modifier.size(15.dp).padding(start = 2.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 val last = item.last
@@ -300,9 +300,9 @@ fun SearchScreen(repo: Repository, onBack: () -> Unit, onOpenProfile: (String) -
             if (channels.isNotEmpty()) item { Text("Каналы", Modifier.padding(start = 18.dp, top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall, color = Honey) }
             items(channels, key = { "c" + it.id }) { c ->
                 Row(Modifier.fillMaxWidth().clickable { onOpenChat(c.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    GroupAvatar(c.id, true, 50.dp)
+                    GroupAvatar(c.id, true, 50.dp, photo = c.photo)
                     Column(Modifier.padding(start = 14.dp)) {
-                        GroupTitle(c.title, true)
+                        GroupTitle(c.title, true, badge = c.badge)
                         Text("@${c.handle} · ${ru.beemes.app.data.Chat(type = "channel", isPublic = true, membersCount = c.membersCount).subtitle}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

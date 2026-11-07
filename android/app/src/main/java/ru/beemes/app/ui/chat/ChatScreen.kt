@@ -391,9 +391,9 @@ private fun ChatTopBar(
         ) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
             if (group != null) Row(Modifier.weight(1f).clickable(onClick = onProfile), verticalAlignment = Alignment.CenterVertically) {
-                ru.beemes.app.ui.groups.GroupAvatar(group.id, group.isChannel, 40.dp)
+                ru.beemes.app.ui.groups.GroupAvatar(group.id, group.isChannel, 40.dp, photo = group.photo)
                 Column(Modifier.padding(start = 10.dp)) {
-                    ru.beemes.app.ui.groups.GroupTitle(group.title, group.isChannel)
+                    ru.beemes.app.ui.groups.GroupTitle(group.title, group.isChannel, badge = group.badge)
                     Text(group.subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
             } else Row(Modifier.weight(1f).clickable(onClick = onProfile), verticalAlignment = Alignment.CenterVertically) {

@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
@@ -186,11 +188,23 @@ fun Honeycomb(modifier: Modifier = Modifier, color: Color = MaterialTheme.colorS
 fun NameWithStatus(user: User, style: TextStyle, modifier: Modifier = Modifier, color: Color = Color.Unspecified, emojiSize: Dp = 20.dp) {
     androidx.compose.foundation.layout.Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Text(user.title, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (user.badge) {
+            androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
+            VerifiedBadge(emojiSize * 0.9f, "Подтверждённый аккаунт")
+        }
         Emoji.statusCode(user.statusEmoji)?.let { code ->
             androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
             AnimatedEmoji(code, emojiSize)
         }
     }
+}
+
+/** Синяя галочка: аккаунт или канал подтверждён (выдаёт администратор beemes). */
+val VerifiedBlue = Color(0xFF3D9BF0)
+
+@Composable
+fun VerifiedBadge(size: Dp = 18.dp, description: String = "Подтверждено", tint: Color = VerifiedBlue) {
+    androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Verified, description, Modifier.size(size), tint = tint)
 }
 
 /** Эмодзи: анимированный, если есть в наборе, иначе обычный. */

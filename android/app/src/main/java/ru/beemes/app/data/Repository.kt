@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import ru.beemes.app.BuildConfig
@@ -141,6 +142,7 @@ class Repository(private val context: Context) {
         privateKey = null
         vault.clear()
         session = null
+        adminCached = null
         prefs.edit().clear().apply()
         _me.value = null
         _chats.value = emptyList()
@@ -226,6 +228,23 @@ class Repository(private val context: Context) {
             .post("{}".toRequestBody("application/json".toMediaType()))
             .header("Authorization", t).header("X-BM-Session", id).build()
         kotlinx.coroutines.withContext(Dispatchers.IO) { api.client.newCall(request).execute().close() }
+    }
+
+    // ---------- Админ-панель (только у админа: users.admin ставится в панели PocketBase) ----------
+
+    @Volatile private var adminCached: Boolean? = null
+
+    /** Я админ? Спрашиваем сервер один раз (поле скрытое). */
+    suspend fun isAdmin(): Boolean = adminCached ?: runCatching { api.get("api/bm/admin/me", AdminMe.serializer()).admin }.getOrDefault(false).also { adminCached = it }
+
+    /** kind: "users" или "chats"; пустой запрос — все с галочкой. */
+    suspend fun adminSearch(kind: String, q: String): List<AdminRow> =
+        api.get("api/bm/admin/search", AdminList.serializer(), mapOf("kind" to kind, "q" to q.trim())).items
+
+    suspend fun adminBadge(row: AdminRow, badge: Boolean): AdminRow {
+        val r = api.send("POST", "api/bm/admin/badge", AdminRow.serializer(), buildJsonObject { put("kind", row.kind); put("id", row.id); put("badge", badge) })
+        if (r.kind == "user") _users.value[r.id]?.let { applyUser(it.copy(badge = r.badge)) } else runCatching { refreshChats() }
+        return r
     }
 
     // ---------- Устройства, вход по QR-коду, почта и 2FA ----------
@@ -973,6 +992,30 @@ class Repository(private val context: Context) {
     }
 
     fun cachedAvatar(user: User, thumb: String = "160x160"): Bitmap? = avatarUrl(user, thumb)?.let { avatarCache.get(it) }
+
+    /** Фото группы или канала. */
+    private fun groupPhotoUrl(chatId: String, photo: String, thumb: String) = api.url("api/files/chats/$chatId/$photo", mapOf("thumb" to thumb)).toString()
+
+    fun cachedGroupPhoto(chatId: String, photo: String, thumb: String = "160x160"): Bitmap? =
+        photo.takeIf { it.isNotBlank() }?.let { avatarCache.get(groupPhotoUrl(chatId, it, thumb)) }
+
+    suspend fun groupPhoto(chatId: String, photo: String, thumb: String = "160x160"): Bitmap? {
+        if (photo.isBlank()) return null
+        val url = groupPhotoUrl(chatId, photo, thumb)
+        avatarCache.get(url)?.let { return it }
+        return runCatching {
+            val bytes = api.download(url.toHttpUrl())
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull()?.also { avatarCache.put(url, it) }
+    }
+
+    /** Поставить (jpeg) или убрать (null) фото группы/канала — могут админы. */
+    suspend fun setGroupPhoto(chatId: String, jpeg: ByteArray?): Chat {
+        if (jpeg == null) api.sendRaw("PATCH", "api/collections/chats/records/$chatId", buildJsonObject { put("photo", "") })
+        else api.multipart("PATCH", "api/collections/chats/records/$chatId", Chat.serializer(), emptyMap(), mapOf("photo" to Triple("photo.jpg", "image/jpeg", jpeg)))
+        runCatching { refreshChats() }
+        return reloadChat(chatId)
+    }
 
     fun preparePhoto(uri: Uri): Photos.Prepared = Photos.prepare(context, uri)
 

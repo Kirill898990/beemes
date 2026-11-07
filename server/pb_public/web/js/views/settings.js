@@ -1,5 +1,5 @@
 /* Настройки: мой профиль, оформление, уведомления, пароль, заблокированные, выход и удаление аккаунта. */
-import { h, icon, iconButton, avatar, nameWithStatus, ACCENTS, accentOf, accentVars, customAccent, withPattern, charOf, animoji, emojiGroups, statusCode, modal, toast, disposeEmoji, titleOf } from "../ui.js";
+import { h, icon, iconButton, avatar, nameWithStatus, squareJpeg, ACCENTS, accentOf, accentVars, customAccent, withPattern, charOf, animoji, emojiGroups, statusCode, modal, toast, disposeEmoji, titleOf } from "../ui.js";
 import * as store from "../store.js";
 import { askNotify, canNotify, messageSound } from "../calls.js";
 
@@ -41,6 +41,12 @@ export function menu(root, { go, route }) {
       h("small", {}, "Приходят, когда beemes добавлен на экран «Домой»: «Поделиться» → «На экран „Домой“». Откройте beemes оттуда, войдите и включите уведомления.")))
     : null;
   const active = (r) => (route === r ? " active" : "");
+  // Админ-панель — только у админа (сервер скажет)
+  const adminSlot = h("div", { hidden: true });
+  store.isAdmin().then((yes) => {
+    if (!yes) return;
+    adminSlot.replaceWith(h("div", { class: "card" }, row("verified", "Админ-панель", "Галочки людям и каналам", () => go("#/settings/admin"), active("admin"))));
+  });
   root.replaceChildren(
     h("header", { class: "side-header" }, iconButton("back", "К чатам", () => go("#/")), h("h2", { class: "side-title" }, "Настройки")),
     h("div", { class: "settings" },
@@ -57,6 +63,7 @@ export function menu(root, { go, route }) {
         row("shield", "Почта и 2FA", "Код из письма при входе", () => go("#/settings/security"), active("security")),
         row("key", "Сменить пароль", "Ключ шифрования перешифруется новым паролем", () => go("#/settings/password"), active("password")),
         row("block", "Заблокированные", null, () => go("#/settings/blocked"), active("blocked"))),
+      adminSlot,
       h("div", { class: "card" },
         row("info", "О beemes", null, () => go("#/settings/about"), active("about")),
         h("a", { class: "row-item", href: "../privacy.html", target: "_blank", rel: "noopener" }, icon("shield"), h("span", {}, h("b", {}, "Политика конфиденциальности")), h("span", { class: "chev" }, "↗"))),
@@ -207,13 +214,7 @@ export function myProfile(root, { go }) {
     fileInput.value = "";
     if (!f) return;
     try {
-      const bmp = await createImageBitmap(f, { imageOrientation: "from-image" });
-      const side = Math.min(bmp.width, bmp.height);
-      const c = document.createElement("canvas");
-      c.width = c.height = 512;
-      c.getContext("2d").drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 512, 512);
-      const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.88));
-      await store.setAvatar(blob);
+      await store.setAvatar(await squareJpeg(f));
       renderHead();
       toast("Фото обновлено");
     } catch (e) { toast(e.message || "Не получилось загрузить фото"); }

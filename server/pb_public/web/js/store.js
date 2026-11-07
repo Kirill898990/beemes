@@ -258,6 +258,7 @@ export async function logout() {
   state.privateKey = null;
   state.users.clear();
   state.chats = [];
+  adminCached = null;
   state.loaded = false;
   [chatCache, keyCache, myStates, peerRead, messages].forEach((m) => m.clear());
   photoUrls.forEach((u) => URL.revokeObjectURL(u));
@@ -657,6 +658,22 @@ export async function joinPublic(chatId) {
 
 export const channelByHandle = (handle) => get("api/bm/channels", { handle }).then((r) => r.items[0] || null);
 export const searchChannels = (q) => get("api/bm/channels", { q }).then((r) => r.items).catch(() => []);
+
+// ---------- Админ-панель (только у админа: users.admin ставится в панели PocketBase) ----------
+let adminCached = null;
+/** Я админ? (запоминаем до выхода) */
+export async function isAdmin() {
+  if (adminCached === null) adminCached = await get("api/bm/admin/me").then((r) => !!r.admin).catch(() => false);
+  return adminCached;
+}
+/** kind: "users" | "chats"; пустой запрос — все с галочкой. */
+export const adminSearch = (kind, q) => get("api/bm/admin/search", { kind, q }).then((r) => r.items);
+export async function adminBadge(kind, id, badge) {
+  const r = await post("api/bm/admin/badge", { kind, id, badge });
+  if (kind === "user") { const u = state.users.get(id); if (u) remember({ ...u, badge: r.badge }); }
+  else await refreshChats().catch(() => {});
+  return r;
+}
 export const groupMembers = (id) => get(`api/bm/groups/${id}/members`);
 
 /** Свежие данные группы (после изменений). */

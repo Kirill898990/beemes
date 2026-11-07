@@ -41,6 +41,7 @@ const P = {
   error: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z",
   lock: "M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z",
   shield: "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z",
+  verified: "M23 12l-2.44-2.79.34-3.69-3.61-.82-1.89-3.2L12 2.96 8.6 1.5 6.71 4.69 3.1 5.5l.34 3.7L1 12l2.44 2.79-.34 3.7 3.61.82L8.6 22.5l3.4-1.47 3.4 1.46 1.89-3.19 3.61-.82-.34-3.69L23 12zm-12.91 4.72l-3.8-3.81 1.48-1.48 2.32 2.33 5.85-5.87 1.48 1.48-7.33 7.35z",
   block: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.902 7.902 0 0 1 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1A7.902 7.902 0 0 1 20 12c0 4.42-3.58 8-8 8z",
   bell: "M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z",
   group: "M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z",
@@ -151,7 +152,8 @@ export function groupAvatar(chat, size = 48) {
   return el;
 }
 /** Название группы с её значком. */
-export const groupTitle = (chat, size = 16) => h("span", { class: "name-status" }, icon(chat.type === "channel" ? "campaign" : "group", size), h("span", { class: "name" }, chat.title || "Группа"));
+export const groupTitle = (chat, size = 16) => h("span", { class: "name-status" }, icon(chat.type === "channel" ? "campaign" : "group", size), h("span", { class: "name" }, chat.title || "Группа"),
+  chat.badge ? badgeIcon(Math.round(size * 1.05), chat.type === "channel" ? "Подтверждённый канал" : "Подтверждённая группа") : null);
 const plural3 = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many);
 /** «3 участника», «канал · 120 подписчиков». */
 export const groupSubtitle = (chat) => {
@@ -347,7 +349,24 @@ function linkify(text) {
 /** Имя и эмодзи-статус. */
 export function nameWithStatus(user, emojiSize = 20) {
   const code = statusCode(user && user.statusEmoji);
-  return h("span", { class: "name-status" }, h("span", { class: "name" }, titleOf(user)), code ? animoji(code, emojiSize) : null);
+  return h("span", { class: "name-status" }, h("span", { class: "name" }, titleOf(user)), user && user.badge ? badgeIcon(Math.round(emojiSize * 0.9), "Подтверждённый аккаунт") : null,
+    code ? animoji(code, emojiSize) : null);
+}
+
+/** Квадратное фото для аватара (обрезка по центру) → JPEG. */
+export async function squareJpeg(file, side = 512) {
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const s = Math.min(bmp.width, bmp.height);
+  const c = document.createElement("canvas");
+  c.width = c.height = side;
+  c.getContext("2d").drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, side, side);
+  return new Promise((r) => c.toBlob(r, "image/jpeg", 0.88));
+}
+
+/** Галочка: аккаунт или канал подтверждён (выдаёт администратор beemes). */
+export function badgeIcon(size = 18, title = "Подтверждено") {
+  const el = h("span", { class: "verified-badge", title, role: "img", "aria-label": title }, icon("verified", size));
+  return el;
 }
 
 // ---------- Фоны чатов ----------

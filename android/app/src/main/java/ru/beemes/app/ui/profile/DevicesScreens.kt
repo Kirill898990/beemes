@@ -1,7 +1,7 @@
 package ru.beemes.app.ui.profile
 
 import android.graphics.Bitmap
-import android.widget.Toast
+import ru.beemes.app.ui.toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -130,7 +130,7 @@ fun DevicesScreen(repo: Repository, onBack: () -> Unit, onQr: (String) -> Unit) 
     val scan = rememberQrScanner { text ->
         if (text == null) return@rememberQrScanner
         if (repo.parseQr(text) != null) onQr(text)
-        else Toast.makeText(context, "Это не QR-код для входа в beemes", Toast.LENGTH_SHORT).show()
+        else context.toast("Это не QR-код для входа в beemes")
     }
     Scaffold(
         topBar = {
@@ -185,8 +185,8 @@ fun DevicesScreen(repo: Repository, onBack: () -> Unit, onQr: (String) -> Unit) 
                 TextButton(onClick = {
                     ending = null
                     scope.launch {
-                        runCatching { repo.endSession(s.id) }.onSuccess { Toast.makeText(context, "Сеанс завершён", Toast.LENGTH_SHORT).show(); load() }
-                            .onFailure { Toast.makeText(context, it.message, Toast.LENGTH_SHORT).show() }
+                        runCatching { repo.endSession(s.id) }.onSuccess { context.toast("Сеанс завершён"); load() }
+                            .onFailure { context.toast(it.message) }
                     }
                 }) { Text("Завершить", color = Danger) }
             },
@@ -202,8 +202,8 @@ fun DevicesScreen(repo: Repository, onBack: () -> Unit, onQr: (String) -> Unit) 
                 TextButton(onClick = {
                     endingOthers = false
                     scope.launch {
-                        runCatching { repo.endOtherSessions() }.onSuccess { Toast.makeText(context, "Завершено: $it", Toast.LENGTH_SHORT).show(); load() }
-                            .onFailure { Toast.makeText(context, it.message, Toast.LENGTH_SHORT).show() }
+                        runCatching { repo.endOtherSessions() }.onSuccess { context.toast("Завершено: $it"); load() }
+                            .onFailure { context.toast(it.message) }
                     }
                 }) { Text("Завершить все", color = Danger) }
             },
@@ -341,7 +341,7 @@ fun SecurityScreen(repo: Repository, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var ask by remember { mutableStateOf<Pair<String, suspend (String) -> Unit>?>(null) }
-    fun toast(t: String) = Toast.makeText(context, t, Toast.LENGTH_SHORT).show()
+    fun toast(t: String) = context.toast(t)
     Scaffold(
         topBar = {
             TopAppBar(

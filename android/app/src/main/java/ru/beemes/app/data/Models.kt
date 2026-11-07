@@ -22,6 +22,8 @@ data class User(
     val email: String = "",
     val verified: Boolean = false,
     val twoFactor: Boolean = false,
+    /** Галочка: аккаунт подтверждён (выдаёт администратор beemes). */
+    val badge: Boolean = false,
     /** Узор из эмодзи на фоне шапки профиля (код Noto). */
     val bgEmoji: String = "",
     val publicKey: String = "",
@@ -74,7 +76,24 @@ data class ChatKey(val id: String = "", val chat: String = "", val user: String 
 data class GroupPreview(
     val id: String = "", val type: String = "", val title: String = "", val about: String = "", val photo: String = "",
     val isPublic: Boolean = false, val handle: String = "", val membersCount: Int = 0, val joined: Boolean = false,
+    val badge: Boolean = false,
 )
+
+/** Строка админ-панели: человек (kind = "user") или канал/группа (kind = "chat"). */
+@Serializable
+data class AdminRow(
+    val kind: String = "", val id: String = "", val badge: Boolean = false,
+    val name: String = "", val username: String = "", val avatar: String = "", val accent: String = "",
+    val type: String = "", val title: String = "", val handle: String = "", val photo: String = "", val isPublic: Boolean = false, val membersCount: Int = 0,
+) {
+    val user: User get() = User(id = id, name = name, username = username, avatar = avatar, accent = accent, badge = badge)
+}
+
+@Serializable
+data class AdminList(val items: List<AdminRow> = emptyList())
+
+@Serializable
+data class AdminMe(val admin: Boolean = false)
 
 /** Участник группы (для «О группе»). */
 @Serializable
@@ -109,6 +128,8 @@ data class Chat(
     val openKey: String = "",
     val keyEpoch: Int = 0,
     val membersCount: Int = 0,
+    /** Галочка: канал или группа подтверждены. */
+    val badge: Boolean = false,
     /** Я в группе (сервер отвечает для групп; у личного чата не важно). */
     val joined: Boolean = true,
 ) {

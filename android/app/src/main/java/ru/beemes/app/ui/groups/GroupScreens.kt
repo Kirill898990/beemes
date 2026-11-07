@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Edit
@@ -56,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,19 +87,35 @@ import ru.beemes.app.ui.theme.Danger
 
 /** Аватар группы/канала: сота цвета по id и значок. */
 @Composable
-fun GroupAvatar(id: String, channel: Boolean, size: Dp, modifier: Modifier = Modifier) {
+fun GroupAvatar(id: String, channel: Boolean, size: Dp, modifier: Modifier = Modifier, photo: String = "") {
     val accent = Accent.forUser("", id)
+    val repo = ru.beemes.app.BeemesApp.repo
+    val thumb = if (size > 100.dp) "480x480" else "160x160"
+    var bitmap by remember(id, photo) { mutableStateOf(repo?.cachedGroupPhoto(id, photo, thumb)) }
+    LaunchedEffect(id, photo) { if (bitmap == null && photo.isNotBlank()) bitmap = repo?.groupPhoto(id, photo, thumb) }
     Box(modifier.size(size).clip(HexShape).background(accent.brush), contentAlignment = Alignment.Center) {
-        Icon(if (channel) Icons.Filled.Campaign else Icons.Filled.Groups, null, Modifier.size(size * 0.5f), tint = accent.onColor)
+        val b = bitmap
+        if (b != null) androidx.compose.foundation.Image(b.asImageBitmap(), null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        else Icon(if (channel) Icons.Filled.Campaign else Icons.Filled.Groups, null, Modifier.size(size * 0.5f), tint = accent.onColor)
     }
 }
 
 /** Название группы со значком. */
 @Composable
-fun GroupTitle(title: String, channel: Boolean, modifier: Modifier = Modifier, style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.titleMedium, color: Color = Color.Unspecified) {
+fun GroupTitle(
+    title: String, channel: Boolean, modifier: Modifier = Modifier, style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.titleMedium,
+    color: Color = Color.Unspecified, badge: Boolean = false,
+) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Icon(if (channel) Icons.Filled.Campaign else Icons.Filled.Groups, null, Modifier.size(18.dp).padding(end = 2.dp), tint = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurface else color)
-        Text(title.ifBlank { "Группа" }, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+        Text(title.ifBlank { "Группа" }, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp).weight(1f, fill = false))
+        if (badge) {
+            Spacer(Modifier.size(4.dp))
+            ru.beemes.app.ui.components.VerifiedBadge(
+                (style.fontSize.value.takeIf { it > 0 } ?: 16f).dp * 1.05f, if (channel) "Подтверждённый канал" else "Подтверждённая группа",
+                tint = if (color == Color.White) Color.White else ru.beemes.app.ui.components.VerifiedBlue,
+            )
+        }
     }
 }
 
@@ -212,6 +230,15 @@ fun GroupInfoScreen(repo: Repository, chatId: String, onBack: () -> Unit, onOpen
         members = if (!c.isChannel || c.isAdmin(myId)) runCatching { repo.groupMembers(chatId) }.getOrNull() else null
     }
     LaunchedEffect(chatId) { runCatching { load() }.onFailure { message = it.message } }
+    // Фото группы/канала — меняют админы
+    val pickPhoto = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching { repo.setGroupPhoto(chatId, kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ru.beemes.app.data.Photos.avatar(context, uri) }) }
+                .onSuccess { chat = it; message = "Фото обновлено" }.onFailure { message = it.message ?: "Не получилось загрузить фото" }
+        }
+    }
+    fun choosePhoto() = pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
     val c = chat
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (c == null) { TopBar("", onBack); message?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }; return@Column }
@@ -223,9 +250,14 @@ fun GroupInfoScreen(repo: Repository, chatId: String, onBack: () -> Unit, onOpen
                 Box(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(Color(0xFF7D5CFF), Color(0xFFFF5E8A))))) {
                     Column(Modifier.fillMaxWidth().statusBarsPadding().padding(bottom = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Row(Modifier.fillMaxWidth()) { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", tint = Color.White) } }
-                        GroupAvatar(c.id, c.isChannel, 116.dp)
+                        Box(contentAlignment = Alignment.BottomEnd) {
+                            GroupAvatar(c.id, c.isChannel, 116.dp, if (admin) Modifier.clickable { choosePhoto() } else Modifier, photo = c.photo)
+                            if (admin) Box(Modifier.size(34.dp).background(Color.White, androidx.compose.foundation.shape.CircleShape).clickable { choosePhoto() }, contentAlignment = Alignment.Center) {
+                                Icon(Icons.Filled.PhotoCamera, "Сменить фото", Modifier.size(18.dp), tint = Color(0xFF7D5CFF))
+                            }
+                        }
                         Spacer(Modifier.height(12.dp))
-                        GroupTitle(c.title, c.isChannel, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold), color = Color.White)
+                        GroupTitle(c.title, c.isChannel, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold), color = Color.White, badge = c.badge)
                         Text(c.subtitle + (if (c.handle.isNotBlank()) " · @${c.handle}" else ""), color = Color.White.copy(alpha = 0.85f))
                     }
                 }
@@ -246,7 +278,24 @@ fun GroupInfoScreen(repo: Repository, chatId: String, onBack: () -> Unit, onOpen
                     if (admin && !c.isPublic) TextButton(onClick = { scope.launch { runCatching { chat = repo.newInvite(c.id); message = "Старая ссылка больше не работает" }.onFailure { message = it.message } } }, modifier = Modifier.padding(start = 6.dp)) { Text("Новая ссылка") }
                 }
             }
-            if (admin) item { Section("Настройки") { Row(Modifier.fillMaxWidth().clickable { editing = true }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.Edit, null, tint = MaterialTheme.colorScheme.primary); Text("Название и описание", Modifier.padding(start = 12.dp)) } } }
+            if (admin) item {
+                Section("Настройки") {
+                    Column {
+                        Row(Modifier.fillMaxWidth().clickable { editing = true }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.Edit, null, tint = MaterialTheme.colorScheme.primary); Text("Название и описание", Modifier.padding(start = 12.dp)) }
+                        Row(Modifier.fillMaxWidth().clickable { choosePhoto() }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.PhotoCamera, null, tint = MaterialTheme.colorScheme.primary)
+                            Column(Modifier.padding(start = 12.dp)) {
+                                Text(if (c.photo.isNotBlank()) "Сменить фото" else "Поставить фото")
+                                Text(if (c.isChannel) "Аватарка канала — видна всем подписчикам" else "Аватарка группы — видна всем участникам", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (c.photo.isNotBlank()) Row(
+                            Modifier.fillMaxWidth().clickable { scope.launch { runCatching { repo.setGroupPhoto(c.id, null) }.onSuccess { chat = it; message = "Фото убрано" }.onFailure { message = it.message } } }.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) { Icon(Icons.Filled.DeleteForever, null, tint = Danger); Text("Убрать фото", Modifier.padding(start = 12.dp), color = Danger) }
+                    }
+                }
+            }
             members?.let { list ->
                 item { Text("${if (c.isChannel) "Подписчики" else "Участники"} (${list.size})", Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary) }
                 items(list, key = { it.id }) { m -> MemberRow(m, myId, owner, admin, onOpenProfile,
@@ -366,8 +415,8 @@ fun JoinScreen(repo: Repository, link: String, onBack: () -> Unit, onJoined: (St
                 error != null -> Text(error!!, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                 p == null -> CircularProgressIndicator()
                 else -> {
-                    GroupAvatar(p.id, p.type == "channel", 110.dp)
-                    GroupTitle(p.title, p.type == "channel", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+                    GroupAvatar(p.id, p.type == "channel", 110.dp, photo = p.photo)
+                    GroupTitle(p.title, p.type == "channel", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold), badge = p.badge)
                     Text(Chat(type = p.type, isPublic = p.isPublic, membersCount = p.membersCount).subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (p.about.isNotBlank()) Text(p.about, textAlign = TextAlign.Center)
                     if (invite?.key?.isNotBlank() == true) Text("🔒 Сообщения зашифрованы, ключ — в самой ссылке.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -457,7 +458,7 @@ fun MyProfileScreen(repo: Repository, onBack: () -> Unit) {
 fun SettingsScreen(
     repo: Repository, theme: String, onTheme: (String) -> Unit, onBack: () -> Unit,
     onProfile: () -> Unit, onPassword: () -> Unit, onBlocked: () -> Unit, onAbout: () -> Unit, onSchool: () -> Unit = {},
-    onDevices: () -> Unit = {}, onSecurity: () -> Unit = {},
+    onDevices: () -> Unit = {}, onSecurity: () -> Unit = {}, onAdmin: () -> Unit = {},
 ) {
     val me by repo.me.collectAsState()
     val student by repo.school.student.collectAsState()
@@ -465,6 +466,9 @@ fun SettingsScreen(
     var notifications by remember { mutableStateOf(repo.notificationsEnabled) }
     var confirmLogout by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    // Админ-панель — только у админа (сервер скажет)
+    var isAdmin by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { isAdmin = repo.isAdmin() }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -522,6 +526,9 @@ fun SettingsScreen(
                 RowItem(Icons.Filled.Key, "Сменить пароль", "Ключ шифрования перешифруется новым паролем", onClick = onPassword)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(start = 56.dp))
                 RowItem(Icons.Filled.Block, "Заблокированные", onClick = onBlocked)
+            }
+            if (isAdmin) Section {
+                RowItem(Icons.Filled.Verified, "Админ-панель", "Галочки людям и каналам", onClick = onAdmin)
             }
             Section {
                 RowItem(Icons.Filled.Info, "О beemes", "Версия ${BuildConfig.VERSION_NAME}", onClick = onAbout)
