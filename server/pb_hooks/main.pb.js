@@ -67,16 +67,38 @@ routerAdd("POST", "/api/bm/push-test", (e) => {
   return e.json(200, report)
 }, $apis.requireAuth("users"))
 
+// Старые версии приложения раз в минуту отмечаются здесь — считаем их «в сети» ещё 90 секунд.
 routerAdd("POST", "/api/bm/online", (e) => {
-  const { iso } = require(`${__hooks}/lib.js`)
-  e.app.db().newQuery("UPDATE users SET lastSeen = {:t} WHERE id = {:id}").bind({ t: iso(Date.now()), id: e.auth.id }).execute()
+  const { presenceUpdate } = require(`${__hooks}/lib.js`)
+  presenceUpdate(e.app, e.auth.id, "legacy", "online", 0, 90 * 1000)
   return e.json(200, { ok: true })
 }, $apis.requireAuth("users"))
 
-// «Был(а) в сети» видят все, кроме тех случаев, когда человек это скрыл.
+// «В сети» без задержки. Приложение сообщает: открыто (state=online, каждые 20 секунд) или свёрнуто/закрыто
+// (state=offline). У человека может быть несколько устройств — «в сети», пока открыто хоть одно.
+// seq — номер сигнала от устройства: если «вышел» дошёл позже, чем «вернулся», старый не учитываем.
+// При закрытии страницы браузер шлёт «вышел» маячком (sendBeacon) — без заголовков, поэтому вход в теле (token).
+routerAdd("POST", "/api/bm/presence", (e) => {
+  const { presenceUpdate } = require(`${__hooks}/lib.js`)
+  const body = e.requestInfo().body || {}
+  let auth = e.auth
+  if (!auth && body.token) {
+    try { auth = e.app.findAuthRecordByToken(String(body.token), "auth") } catch (_) { auth = null }
+  }
+  if (!auth || auth.collection().name !== "users") throw new UnauthorizedError("Нужно войти")
+  const state = body.state === "online" ? "online" : "offline"
+  const device = String(body.device || "default").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "default"
+  const online = presenceUpdate(e.app, auth.id, device, state, Number(body.seq) || 0, 45 * 1000)
+  return e.json(200, { online })
+})
+
+// «Был(а) в сети» и «в сети» видят все, кроме тех случаев, когда человек это скрыл.
 onRecordEnrich((e) => {
   const me = e.requestInfo && e.requestInfo.auth
-  if (e.record.getBool("hideLastSeen") && (!me || me.id !== e.record.id)) e.record.set("lastSeen", "")
+  if (e.record.getBool("hideLastSeen") && (!me || me.id !== e.record.id)) {
+    e.record.set("lastSeen", "")
+    e.record.set("onlineUntil", "")
+  }
   e.next()
 }, "users")
 

@@ -1,7 +1,7 @@
 /* beemes в браузере и в приложении для Windows: запуск, раскладка (чаты слева, переписка справа), переходы. */
 import * as store from "./store.js";
 import * as realtime from "./realtime.js";
-import { h, loadEmoji, animoji, icon, disposeEmoji } from "./ui.js";
+import { h, loadEmoji, animoji, icon, disposeEmoji, when } from "./ui.js";
 import * as auth from "./views/auth.js";
 import { chatList, search } from "./views/chats.js";
 import { chatView } from "./views/chat.js";
@@ -97,21 +97,44 @@ function maybeAskNotify() {
 
 // ---------- После входа ----------
 let pinger = null;
+let ticker = null;
+const visible = () => !document.hidden;
 function onSignedIn() {
   realtime.start();
   store.refreshChats().catch(() => {});
-  store.ping();
+  if (visible()) store.presence("online");
   clearInterval(pinger);
-  pinger = setInterval(() => { if (!document.hidden) store.ping(); }, 60000);
+  // Пока beemes открыт — «я тут» каждые 20 секунд (сервер держит «в сети» 45 секунд).
+  pinger = setInterval(() => { if (visible()) store.presence("online"); }, 20000);
+  // Раз в полминуты обновляем «был(а) N мин. назад».
+  clearInterval(ticker);
+  ticker = setInterval(() => store.emit("users"), 30000);
   checkIncoming();
   if (["#/welcome", "#/login", "#/register", ""].includes(location.hash)) go("#/");
   else route();
 }
 
+// Собеседник пропал без «до свидания» (сел телефон, пропал интернет): его «в сети» истекает само —
+// перерисовываем ровно в этот момент.
+let expiry = null;
+function watchExpiry() {
+  clearTimeout(expiry);
+  const now = Date.now();
+  let next = Infinity;
+  const look = (u) => { const t = u ? when(u.onlineUntil) : 0; if (t > now && t < next) next = t; };
+  store.state.users.forEach(look);
+  store.state.chats.forEach((i) => look(i.peer));
+  if (next !== Infinity) expiry = setTimeout(() => store.emit("users"), Math.min(next - now + 300, 2147483000));
+}
+store.on("users", watchExpiry);
+store.on("chats", watchExpiry);
+
 store.on("me", (me) => {
   if (!me) {
     realtime.stop();
     clearInterval(pinger);
+    clearInterval(ticker);
+    clearTimeout(expiry);
     route();
   }
 });
@@ -128,15 +151,21 @@ store.on("chats", () => {
 let hiddenAt = 0;
 function resume() {
   if (!store.state.me || !store.state.privateKey) return;
+  store.presence("online");
   if (hiddenAt && Date.now() - hiddenAt > 20000) realtime.restart(); else realtime.ensure();
   hiddenAt = 0;
-  store.ping();
   store.refreshChats().catch(() => {});
   if (store.state.openChatId) store.loadMessages(store.state.openChatId).catch(() => {});
 }
-document.addEventListener("visibilitychange", () => { if (document.hidden) hiddenAt = Date.now(); else resume(); });
+// Свернули вкладку/окно, ушли с сайта, закрыли приложение — сразу «не в сети».
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hiddenAt = Date.now(); if (store.state.me) store.presence("offline", true); } else resume();
+});
+window.addEventListener("pagehide", () => { if (store.state.me) store.presence("offline", true); });
 window.addEventListener("online", resume);
 window.addEventListener("pageshow", (e) => { if (e.persisted) resume(); });
+// Приложение для Windows перед выходом просит отметить «не в сети» и ждёт ответа сервера.
+window.beemesPresenceOffline = () => (store.state.me ? store.presence("offline") : Promise.resolve());
 
 window.addEventListener("hashchange", route);
 

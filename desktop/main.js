@@ -12,7 +12,7 @@ const { app, BrowserWindow, Menu, Tray, Notification, dialog, ipcMain, nativeIma
 const fs = require("fs");
 const path = require("path");
 
-const SITE = process.env.BEEMES_URL || "https://kbast.ru/web/";
+const SITE = process.env.BEEMES_URL || "https://beemes.ru/web/";
 const ORIGIN = new URL(SITE).origin;
 const TITLE = "beemes";
 const ICON = path.join(__dirname, "icon.png");
@@ -144,7 +144,7 @@ function createWindow() {
   });
   win.on("focus", () => win.flashFrame(false));
   win.on("hide", flush);
-  win.on("session-end", flush); // Windows выключается или выходит из учётной записи
+  win.on("session-end", () => { flush(); sayBye(); }); // Windows выключается или выходит из учётной записи
   win.loadURL(SITE);
 }
 
@@ -203,7 +203,20 @@ app.on("web-contents-created", (_e, wc) => guard(wc));
 app.on("second-instance", show);
 /** Сразу записать вход и ключ на диск (браузер пишет с задержкой — при резком закрытии вход мог потеряться). */
 const flush = () => { try { session.defaultSession.flushStorageData(); } catch (_) { /* ignore */ } };
-app.on("before-quit", () => { quitting = true; flush(); });
+// Выход совсем (меню трея, Ctrl+Q, выключение Windows): сначала «не в сети» — собеседники видят это сразу.
+// Ждём ответа сервера не дольше 1,5 секунды, потом выходим.
+let saidBye = false;
+const sayBye = () => (win && !win.isDestroyed()
+  ? win.webContents.executeJavaScript("window.beemesPresenceOffline ? window.beemesPresenceOffline() : null", true).catch(() => {})
+  : Promise.resolve());
+app.on("before-quit", (e) => {
+  quitting = true;
+  flush();
+  if (saidBye || !win || win.isDestroyed()) return;
+  saidBye = true;
+  if (e && e.preventDefault) e.preventDefault();
+  Promise.race([sayBye(), new Promise((r) => setTimeout(r, 1500))]).then(() => { flush(); app.quit(); });
+});
 ipcMain.on("beemes:show", show);
 ipcMain.on("beemes:flush", flush);
 

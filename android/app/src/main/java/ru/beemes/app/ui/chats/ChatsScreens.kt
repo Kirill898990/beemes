@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.beemes.app.data.ChatItem
+import ru.beemes.app.data.PresenceClock
 import ru.beemes.app.data.Repository
 import ru.beemes.app.data.SendStatus
 import ru.beemes.app.data.User
@@ -183,7 +184,8 @@ private fun ChatRow(item: ChatItem, myId: String, onClick: () -> Unit, onLongCli
     ) {
         Box {
             Avatar(item.peer, 56.dp)
-            if (item.peer.online) {
+            val now by PresenceClock.now.collectAsState()
+            if (item.peer.onlineAt(now)) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(2.dp).size(14.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.5.dp).background(Online, CircleShape),
                 )

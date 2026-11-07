@@ -27,7 +27,7 @@ class BeemesApp : Application() {
         repo = repository
         Emoji.load(this)
         Notifier.createChannels(this)
-        // Пока приложение на экране: события сразу (realtime) и отметка «в сети» раз в минуту.
+        // Пока приложение на экране: события сразу (realtime) и «в сети». Свернули или закрыли — сразу «не в сети».
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 inForeground = true
@@ -37,7 +37,9 @@ class BeemesApp : Application() {
             override fun onStop(owner: LifecycleOwner) {
                 inForeground = false
                 pinger?.cancel()
+                repository.stopPresenceClock()
                 repository.realtime.stop()
+                if (repository.signedIn) repository.scope.launch { repository.presence(false) }
             }
         })
     }
@@ -45,11 +47,13 @@ class BeemesApp : Application() {
     /** Вошли (или открыли приложение, уже войдя): связь в реальном времени, «в сети», push. */
     fun onSignedIn() {
         repository.realtime.start()
+        repository.startPresenceClock()
         pinger?.cancel()
+        // «Я тут» каждые 20 секунд (сервер держит «в сети» 45 секунд — если телефон внезапно выключится).
         pinger = repository.scope.launch {
             while (isActive) {
-                repository.ping()
-                delay(60_000)
+                repository.presence(true)
+                delay(20_000)
             }
         }
         registerPush()

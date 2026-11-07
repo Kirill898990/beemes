@@ -98,6 +98,7 @@ import ru.beemes.app.data.Emoji
 import ru.beemes.app.data.Photos
 import ru.beemes.app.data.Repository
 import ru.beemes.app.data.User
+import ru.beemes.app.data.PresenceClock
 import ru.beemes.app.data.lastSeenText
 import ru.beemes.app.ui.components.AnimatedEmoji
 import ru.beemes.app.ui.components.Avatar
@@ -180,7 +181,8 @@ fun PeerProfileScreen(
         }
     }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).verticalScroll(rememberScrollState())) {
-        ProfileHeader(user, onBack, "@${user.username} · ${lastSeenText(user)}")
+        val now by PresenceClock.now.collectAsState()
+        ProfileHeader(user, onBack, "@${user.username} · ${lastSeenText(user, now)}")
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             QuickAction(Icons.AutoMirrored.Filled.Chat, "Написать", Modifier.weight(1f)) { withChat(onOpenChat) }
             QuickAction(Icons.Filled.Call, "Звонок", Modifier.weight(1f)) { withChat { onCall(it, false) } }

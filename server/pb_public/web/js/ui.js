@@ -129,12 +129,19 @@ export function dayTitle(d) {
   if (sameDay(d, y)) return "Вчера";
   return d.toLocaleDateString(ru, d.getFullYear() === now.getFullYear() ? { day: "numeric", month: "long" } : { day: "numeric", month: "long", year: "numeric" });
 }
-export const isOnline = (u) => !!(u && u.lastSeen && Date.now() - new Date(String(u.lastSeen).replace(" ", "T")) < 120000);
+export const when = (v) => (v ? new Date(String(v).replace(" ", "T")).getTime() : 0);
+/** «В сети»: до onlineUntil (его продлевает открытое приложение). Старые записи — по lastSeen. */
+export const isOnline = (u) => {
+  if (!u) return false;
+  if (u.onlineUntil !== undefined) return when(u.onlineUntil) > Date.now();
+  return !!u.lastSeen && Date.now() - when(u.lastSeen) < 120000;
+};
 export function lastSeenText(u) {
   if (isOnline(u)) return "в сети";
   if (!u || !u.lastSeen) return u && u.hideLastSeen ? "был(а) недавно" : "был(а) давно";
   const d = new Date(String(u.lastSeen).replace(" ", "T"));
   const min = Math.round((Date.now() - d) / 60000);
+  if (min < 1) return "был(а) только что";
   if (min < 60) return `был(а) ${min} мин. назад`;
   const now = new Date();
   if (sameDay(d, now)) return `был(а) в ${timeOfDay(d)}`;

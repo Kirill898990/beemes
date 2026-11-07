@@ -11,8 +11,8 @@ plugins {
 if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
 
 // ===== АДРЕС СЕРВЕРА =====
-// Пока beemes.ru не заработал, beemes живёт на kbast.ru. Потом поменять здесь на https://beemes.ru.
-val releaseServerUrl = "https://kbast.ru"
+// Адрес сервера beemes. kbast.ru тоже работает — для старых версий приложения.
+val releaseServerUrl = "https://beemes.ru"
 // Для проверки с сервером на своём компьютере: в local.properties строка server.url=http://10.0.2.2:8091
 val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
@@ -38,8 +38,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Перед каждой новой версией увеличивайте versionCode на 1.
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     signingConfigs {

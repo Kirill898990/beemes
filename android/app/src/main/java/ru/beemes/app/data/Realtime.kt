@@ -37,6 +37,7 @@ class Realtime(private val repo: Repository) {
         val name: String get() = field("name")?.takeIf { it.isString }?.content.orEmpty()
     }
     @Serializable private data class SignalEvent(val action: String = "", val record: SignalRecord = SignalRecord())
+    @Serializable private data class UserEvent(val action: String = "", val record: User = User())
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var source: EventSource? = null
@@ -47,13 +48,42 @@ class Realtime(private val repo: Repository) {
     /** Звонки, пока приложение открыто: ring — звонят, accept/decline/hangup — звонок закончился. */
     val signals: SharedFlow<SignalRecord> = _rings
 
+    @Volatile private var clientId = ""
+    @Volatile private var lastTopics = ""
+    private var peersJob: Job? = null
+
     fun start() {
         wanted = true
         if (source == null) connect()
+        // Новые собеседники — следим и за их «в сети».
+        if (peersJob?.isActive != true) peersJob = scope.launch {
+            repo.chats.collect { resubscribe() }
+        }
+    }
+
+    private fun topics() = listOf("messages", "chat_state", "chats", "call_signals") + repo.peerIds().map { "users/$it" }
+
+    /** Подписка: свои чаты, сообщения, звонки и «в сети» каждого собеседника (users/<id>). */
+    private suspend fun resubscribe() {
+        val id = clientId
+        if (id.isBlank()) return
+        val t = topics()
+        val key = id + "|" + t.joinToString(",")
+        if (key == lastTopics) return
+        lastTopics = key
+        runCatching {
+            repo.api.sendRaw("POST", "api/realtime", buildJsonObject {
+                put("clientId", id)
+                put("subscriptions", JsonArray(t.map { JsonPrimitive(it) }))
+            })
+        }.onFailure { lastTopics = "" }
     }
 
     fun stop() {
         wanted = false
+        clientId = ""
+        lastTopics = ""
+        peersJob?.cancel()
         retryJob?.cancel()
         source?.cancel()
         source = null
@@ -83,14 +113,10 @@ class Realtime(private val repo: Repository) {
         val json = repo.api.json
         when (type) {
             "PB_CONNECT" -> {
-                val clientId = json.decodeFromString(Connect.serializer(), data).clientId
+                clientId = json.decodeFromString(Connect.serializer(), data).clientId
+                lastTopics = ""
                 scope.launch {
-                    runCatching {
-                        repo.api.sendRaw("POST", "api/realtime", buildJsonObject {
-                            put("clientId", clientId)
-                            put("subscriptions", JsonArray(listOf("messages", "chat_state", "chats", "call_signals").map { JsonPrimitive(it) }))
-                        })
-                    }
+                    resubscribe()
                     // Пока не было связи, могло что-то прийти.
                     runCatching { repo.refreshChats() }
                     repo.openChatId?.let { runCatching { repo.loadMessages(it) } }
@@ -106,6 +132,8 @@ class Realtime(private val repo: Repository) {
                 val e = json.decodeFromString(SignalEvent.serializer(), data)
                 if (e.action == "create") _rings.tryEmit(e.record)
             }
+            // «В сети» собеседника: событие называется как подписка — users/<id>.
+            else -> if (type.startsWith("users/")) repo.applyUser(json.decodeFromString(UserEvent.serializer(), data).record)
         }
     }
 }

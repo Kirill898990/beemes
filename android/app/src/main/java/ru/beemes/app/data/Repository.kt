@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
@@ -112,6 +113,8 @@ class Repository(private val context: Context) {
     }
 
     fun logout() {
+        // Сразу «не в сети» (вход уже забыт — поэтому он в самом сигнале).
+        token?.let { t -> scope.launch { presence(false, withToken = t) } }
         realtime.stop()
         school.disconnect()
         token = null
@@ -540,9 +543,57 @@ class Repository(private val context: Context) {
         prefs.edit().putString("push_token", fcmToken + "|" + me.id).apply()
     }
 
-    suspend fun ping() {
-        if (signedIn) runCatching { api.sendRaw("POST", "api/bm/online") }
+    private val deviceId: String by lazy {
+        prefs.getString("device_id", null) ?: ("a" + UUID.randomUUID().toString().replace("-", "").take(16)).also {
+            prefs.edit().putString("device_id", it).apply()
+        }
     }
+    private var presenceSeq = 0L
+
+    /**
+     * Сообщить серверу: приложение на экране (online, каждые 20 секунд) или свёрнуто/закрыто (offline).
+     * Собеседники видят «в сети» и его пропажу сразу. seq — номер сигнала: запоздавший старый не перебьёт новый.
+     */
+    suspend fun presence(online: Boolean, withToken: String? = null) {
+        val t = withToken ?: token ?: return
+        val seq = synchronized(this) { presenceSeq = maxOf(presenceSeq + 1, System.currentTimeMillis()); presenceSeq }
+        runCatching {
+            api.sendRaw("POST", "api/bm/presence", buildJsonObject {
+                put("state", if (online) "online" else "offline"); put("device", deviceId); put("seq", seq)
+                if (withToken != null) put("token", t)
+            })
+        }
+    }
+
+    /** Обновление записи человека пришло в реальном времени (вошёл или вышел из сети). */
+    fun applyUser(user: User) {
+        if (user.id.isBlank()) return
+        remember(user)
+        _chats.update { l -> l.map { if (it.peer.id == user.id) it.copy(peer = user) else it } }
+    }
+
+    /** id собеседников — за их «в сети» следим в реальном времени. */
+    fun peerIds(): List<String> = _chats.value.map { it.peer.id }.distinct().take(300)
+
+    private var clockJob: kotlinx.coroutines.Job? = null
+
+    /** Пока приложение на экране — часы «в сети» тикают ровно тогда, когда у кого-то истекает «в сети». */
+    fun startPresenceClock() {
+        clockJob?.cancel()
+        clockJob = scope.launch {
+            kotlinx.coroutines.flow.combine(users, chats) { u, c -> u.values.map { it.onlineUntilMillis } + c.map { it.peer.onlineUntilMillis } }
+                .collectLatest { untils ->
+                    while (true) {
+                        val now = System.currentTimeMillis()
+                        val next = untils.filter { it > now }.minOrNull()
+                        kotlinx.coroutines.delay(if (next == null) 30_000 else (next - now + 300).coerceAtMost(30_000))
+                        PresenceClock.now.value = System.currentTimeMillis()
+                    }
+                }
+        }
+    }
+
+    fun stopPresenceClock() { clockJob?.cancel() }
 
     var notificationsEnabled: Boolean
         get() = prefs.getBoolean("notifications", true)

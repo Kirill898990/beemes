@@ -27,13 +27,13 @@
 
 ## Сервер
 
-Нужен свой сервер (VDS) с Ubuntu 24.04 и свой домен. Сейчас beemes работает на `kbast.ru`
-(позже переедет на `beemes.ru`). В DNS домена добавьте две A-записи с IP-адресом сервера:
-`@` (сам домен) и `www`. Затем на сервере под root:
+Нужен свой сервер (VDS) с Ubuntu 24.04 и свой домен. beemes работает на `beemes.ru`; старый адрес
+`kbast.ru` тоже открывается — на нём остаются старые версии приложения. В DNS домена добавьте две A-записи
+с IP-адресом сервера: `@` (сам домен) и `www`. Затем на сервере под root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main/server/install.sh \
-  | bash -s -- kbast.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
+  | ALSO_DOMAINS="kbast.ru" bash -s -- beemes.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
 ```
 
 Что произойдёт:
@@ -56,7 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main
 2. Скачать `google-services.json` и положить в `android/app/` (в Git его нет). Без него приложение тоже
    собирается и работает, просто без уведомлений.
 3. Настройки проекта → Сервисные аккаунты → «Создать закрытый ключ». Открыть панель администратора
-   `https://kbast.ru/_/` → коллекция `bm_settings` → новая запись → вставить содержимое
+   `https://beemes.ru/_/` → коллекция `bm_settings` → новая запись → вставить содержимое
    скачанного JSON в поле `firebaseKey`. Ключ никому не пересылайте и не кладите в Git.
 
 ### Новая версия приложения на сайте
@@ -68,9 +68,9 @@ curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main
 
 Открыть папку `android/` в Android Studio. Подписанный APK: Build → Generate Signed App Bundle or APK.
 Для проверки со своим компьютером: в `android/local.properties` строка `server.url=http://10.0.2.2:8091`
-(эмулятор) — debug-сборка будет ходить на него, release всегда ходит на `https://kbast.ru`.
+(эмулятор) — debug-сборка будет ходить на него, release всегда ходит на `https://beemes.ru`.
 
-### Переезд на другой домен (например, с kbast.ru на beemes.ru)
+### Переезд на другой домен (так beemes переехал с kbast.ru на beemes.ru)
 
 1. В DNS нового домена — A-записи `@` и `www` с IP сервера.
 2. На сервере — та же команда установки с новым доменом, а старый указать в `ALSO_DOMAINS`, чтобы старые

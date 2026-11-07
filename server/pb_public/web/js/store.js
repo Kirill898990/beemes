@@ -4,7 +4,7 @@
  * но достать его байты из браузера нельзя.
  */
 import * as C from "./crypto.js";
-import { ApiError, api, get, post, patch, del, download, setToken, getToken } from "./api.js";
+import { ApiError, api, get, post, patch, del, download, setToken, getToken, url } from "./api.js";
 
 // ---------- События ----------
 const listeners = new Map();
@@ -216,6 +216,7 @@ export async function unlock(password) {
 }
 
 export async function logout() {
+  await presence("offline");
   setToken("");
   ls.del("bm_token");
   ls.del("bm_me");
@@ -291,7 +292,38 @@ export async function deleteAccount() {
 /** Пробное уведомление на мои телефоны → отчёт сервера. */
 export const pushTest = () => post("api/bm/push-test");
 
-export const ping = () => (state.me ? post("api/bm/online").catch(() => {}) : Promise.resolve());
+// ---------- «В сети» ----------
+function deviceId() {
+  let id = ls.get("bm_device");
+  if (!id) { id = "w" + Math.random().toString(36).slice(2, 12); ls.set("bm_device", id); }
+  return id;
+}
+let presenceSeq = 0;
+/**
+ * Сообщить серверу: beemes открыт (online) или свёрнут/закрыт (offline).
+ * closing — страница закрывается: шлём маячком (sendBeacon), его браузер доставит даже после закрытия.
+ */
+export function presence(state, closing = false) {
+  if (!state || !getToken()) return Promise.resolve();
+  presenceSeq = Math.max(presenceSeq + 1, Date.now());
+  const body = { state, device: deviceId(), seq: presenceSeq };
+  if (closing && navigator.sendBeacon) {
+    try {
+      const sent = navigator.sendBeacon(url("api/bm/presence"), new Blob([JSON.stringify({ ...body, token: getToken() })], { type: "application/json" }));
+      if (sent) return Promise.resolve();
+    } catch (_) { /* ниже обычным запросом */ }
+  }
+  return api("POST", "api/bm/presence", { body, keepalive: closing }).catch(() => {});
+}
+/** Обновление записи человека пришло в реальном времени (например, вошёл или вышел из сети). */
+export function applyUser(u) {
+  if (!u || !u.id) return;
+  remember(u);
+  state.chats = state.chats.map((i) => (i.peer.id === u.id ? { ...i, peer: { ...i.peer, ...u } } : i));
+}
+/** id собеседников — за их «в сети» следим в реальном времени. */
+export const peerIds = () => [...new Set(state.chats.map((i) => i.peer.id))].slice(0, 300);
+
 
 // ---------- Чаты ----------
 

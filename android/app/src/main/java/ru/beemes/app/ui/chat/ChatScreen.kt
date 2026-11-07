@@ -119,6 +119,7 @@ import ru.beemes.app.data.Repository
 import ru.beemes.app.data.SendStatus
 import ru.beemes.app.data.User
 import ru.beemes.app.data.dayTitle
+import ru.beemes.app.data.PresenceClock
 import ru.beemes.app.data.lastSeenText
 import ru.beemes.app.data.timeOfDay
 import ru.beemes.app.push.Notifier
@@ -329,8 +330,9 @@ private fun ChatTopBar(peer: User?, onBack: () -> Unit, onProfile: () -> Unit, o
                 if (peer != null) Avatar(peer, 40.dp)
                 Column(Modifier.padding(start = 10.dp)) {
                     if (peer != null) NameWithStatus(peer, MaterialTheme.typography.titleMedium, emojiSize = 18.dp)
-                    val status = peer?.let { lastSeenText(it) }.orEmpty()
-                    Text(status, style = MaterialTheme.typography.bodyMedium, color = if (peer?.online == true) Online else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    val now by PresenceClock.now.collectAsState()
+                    val status = peer?.let { lastSeenText(it, now) }.orEmpty()
+                    Text(status, style = MaterialTheme.typography.bodyMedium, color = if (peer?.onlineAt(now) == true) Online else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
             }
             IconButton(onClick = { onCall(true) }) { Icon(Icons.Filled.Videocam, "Видеозвонок") }

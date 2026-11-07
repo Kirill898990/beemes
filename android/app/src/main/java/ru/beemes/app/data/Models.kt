@@ -20,13 +20,27 @@ data class User(
     val statusEmoji: String = "",
     val publicKey: String = "",
     val lastSeen: String = "",
+    /** «В сети» до этого момента: приложение сообщает серверу, когда его открыли и когда свернули. */
+    val onlineUntil: String = "",
     val hideLastSeen: Boolean = false,
     val created: String = "",
 ) {
     val title: String get() = name.ifBlank { "@$username" }
     val lastSeenInstant: Instant? get() = parseTime(lastSeen)
-    /** В сети: приложение открыто последние 2 минуты. */
-    val online: Boolean get() = lastSeenInstant?.isAfter(Instant.now().minusSeconds(120)) == true
+    val onlineUntilMillis: Long get() = parseTime(onlineUntil)?.toEpochMilli() ?: 0L
+    /** В сети прямо сейчас (now — для экранов, которые перерисовываются по часам «в сети»). */
+    fun onlineAt(now: Long): Boolean =
+        if (onlineUntil.isNotBlank()) onlineUntilMillis > now
+        else lastSeenInstant?.let { now - it.toEpochMilli() < 120_000 } == true
+    val online: Boolean get() = onlineAt(System.currentTimeMillis())
+}
+
+/**
+ * Часы для «в сети»: тикают, когда у кого-то истекает «в сети» (пропал без «до свидания» — сел телефон),
+ * и раз в полминуты. Экраны читают их, чтобы точка и «был(а) N мин. назад» обновлялись сами.
+ */
+object PresenceClock {
+    val now = kotlinx.coroutines.flow.MutableStateFlow(System.currentTimeMillis())
 }
 
 @Serializable
@@ -202,12 +216,13 @@ fun dayTitle(instant: Instant): String {
 }
 
 /** «в сети», «был(а) 5 минут назад», «был(а) вчера в 21:40». */
-fun lastSeenText(user: User): String {
-    if (user.online) return "в сети"
+fun lastSeenText(user: User, now: Long = System.currentTimeMillis()): String {
+    if (user.onlineAt(now)) return "в сети"
     val t = user.lastSeenInstant ?: return if (user.hideLastSeen) "был(а) недавно" else "был(а) давно"
-    val minutes = (Instant.now().epochSecond - t.epochSecond) / 60
+    val minutes = (now / 1000 - t.epochSecond) / 60
     return when {
-        minutes < 60 -> "был(а) ${minutes.coerceAtLeast(1)} мин. назад"
+        minutes < 1 -> "был(а) только что"
+        minutes < 60 -> "был(а) $minutes мин. назад"
         else -> {
             val zone = ZoneId.systemDefault()
             val day = t.atZone(zone).toLocalDate()

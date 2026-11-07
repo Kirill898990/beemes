@@ -1,10 +1,10 @@
 {
   "name": "beemes-desktop",
   "productName": "beemes",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "beemes — мессенджер с живыми эмодзи и шифрованием (приложение для Windows)",
   "author": "Бастриков Кирилл",
-  "homepage": "https://kbast.ru/",
+  "homepage": "https://beemes.ru/",
   "private": true,
   "main": "main.js",
   "scripts": {
