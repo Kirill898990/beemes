@@ -262,7 +262,7 @@ export function password(root, { go }) {
     if (p1.value.length < 8) { err.textContent = "Новый пароль: не меньше 8 символов"; return; }
     if (p1.value !== p2.value) { err.textContent = "Пароли не совпадают"; return; }
     btn.disabled = true; btn.textContent = "Меняем…";
-    try { await store.changePassword(old.value, p1.value); toast("Пароль изменён"); go("#/settings"); } catch (ex) { err.textContent = ex.message; }
+    try { await store.changePassword(old.value, p1.value); toast("Пароль изменён. На других устройствах нужно войти заново."); go("#/settings"); } catch (ex) { err.textContent = ex.message; }
     btn.disabled = false; btn.textContent = "Сменить пароль";
   };
   root.replaceChildren(h("section", { class: "profile-pane" }, h("header", { class: "pane-header" }, iconButton("back", "Назад", () => go("#/settings"), { class: "only-narrow" }), h("h2", {}, "Сменить пароль")), form));

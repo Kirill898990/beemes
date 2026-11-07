@@ -163,7 +163,7 @@ export function qrApprove(root, { id, pub, go }) {
     try {
       const info = await store.qrInfo(id);
       if (!(await store.canApproveQr())) {
-        card.replaceChildren(animoji("1f4f1", 80), h("h2", {}, "Подтвердите в приложении"),
+        card.replaceChildren(animoji("1f512", 80), h("h2", {}, "Подтвердите в приложении"),
           h("p", { class: "muted" }, "В этом браузере ключ переписки защищён — передать его отсюда нельзя. Откройте beemes на телефоне: Настройки → Устройства → «Подключить устройство»."));
         return;
       }
@@ -172,7 +172,7 @@ export function qrApprove(root, { id, pub, go }) {
         yes.disabled = true;
         try { await store.qrApprove(id, pub); card.replaceChildren(animoji("2705", 80), h("h2", {}, "Готово"), h("p", { class: "muted" }, `«${info.name}» вошло в ваш аккаунт.`)); } catch (e) { toast(e.message); yes.disabled = false; }
       };
-      card.replaceChildren(animoji("1f510", 80), h("h2", {}, "Войти на новом устройстве?"),
+      card.replaceChildren(animoji("1f512", 80), h("h2", {}, "Войти на новом устройстве?"),
         h("p", {}, h("b", {}, info.name), info.ip ? ` · IP ${info.ip}` : ""),
         h("p", { class: "muted small" }, "Подтверждайте, только если этот QR-код показан на вашем устройстве."),
         yes, h("button", { type: "button", class: "btn btn-text", onclick: async () => { await store.qrDecline(id).catch(() => {}); go("#/"); } }, "Это не я"));

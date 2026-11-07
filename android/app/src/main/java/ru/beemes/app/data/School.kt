@@ -59,7 +59,7 @@ class School(context: Context, private val vault: Vault) {
     @Serializable private data class Works(val items: List<Work> = emptyList(), val totalPages: Int = 1)
 
     private val prefs = context.getSharedPreferences("school", Context.MODE_PRIVATE)
-    private val api = Api(BuildConfig.SCHOOL_URL) { token() }
+    private val api = Api(BuildConfig.SCHOOL_URL, token = { token() })
     private val json get() = api.json
 
     private val _student = MutableStateFlow(prefs.getString(KEY_STUDENT, null)?.let { runCatching { json.decodeFromString(Student.serializer(), it) }.getOrNull() })

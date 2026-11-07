@@ -20,10 +20,18 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /** Ошибка сервера с понятным текстом. fields — ошибки отдельных полей (например, «username»). */
-class ApiException(message: String, val status: Int = 0, val fields: Map<String, String> = emptyMap()) : Exception(message)
+class ApiException(message: String, val status: Int = 0, val fields: Map<String, String> = emptyMap(), val twoFactor: String? = null) : Exception(message)
 
-/** Связь с сервером beemes (PocketBase). */
-class Api(baseUrl: String, private val token: () -> String?) {
+/**
+ * Связь с сервером beemes (PocketBase).
+ * headers — устройство и сеанс (X-BM-Device, X-BM-Session); renew — продлить вход секретом сеанса, если пропуск устарел.
+ */
+class Api(
+    baseUrl: String,
+    private val token: () -> String?,
+    private val headers: () -> Map<String, String> = { emptyMap() },
+    private val renew: suspend () -> Boolean = { false },
+) {
     val base: HttpUrl = baseUrl.trimEnd('/').toHttpUrl()
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false }
 
@@ -62,7 +70,7 @@ class Api(baseUrl: String, private val token: () -> String?) {
 
     /** Скачать файл (байты). */
     suspend fun download(url: HttpUrl): ByteArray = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url).apply { token()?.let { header("Authorization", it) } }.build()
+        val request = Request.Builder().url(url).apply { token()?.let { header("Authorization", it) }; headers().forEach { (k, v) -> header(k, v) } }.build()
         try {
             client.newCall(request).execute().use { r ->
                 if (!r.isSuccessful) throw ApiException("Не получилось загрузить файл", r.code)
@@ -73,34 +81,44 @@ class Api(baseUrl: String, private val token: () -> String?) {
         }
     }
 
-    private suspend fun raw(method: String, url: HttpUrl, body: RequestBody?): String = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url)
-            .method(method, body ?: if (method == "POST" || method == "PATCH") "{}".toRequestBody(JSON) else null)
-            .apply { token()?.let { header("Authorization", it) } }
-            .build()
-        val response = try {
-            client.newCall(request).execute()
-        } catch (e: IOException) {
-            throw ApiException("Нет связи с сервером. Проверьте интернет.")
+    private suspend fun raw(method: String, url: HttpUrl, body: RequestBody?, retried: Boolean = false): String {
+        val (code, text) = withContext(Dispatchers.IO) {
+            val request = Request.Builder().url(url)
+                .method(method, body ?: if (method == "POST" || method == "PATCH") "{}".toRequestBody(JSON) else null)
+                .apply { token()?.let { header("Authorization", it) }; headers().forEach { (k, v) -> header(k, v) } }
+                .build()
+            val response = try {
+                client.newCall(request).execute()
+            } catch (e: IOException) {
+                throw ApiException("Нет связи с сервером. Проверьте интернет.")
+            }
+            response.use { r -> r.code to r.body.string() }
         }
-        response.use { r ->
-            val text = r.body.string()
-            if (!r.isSuccessful) throw parseError(r.code, text)
-            text
+        // Пропуск больше не действует (истёк или сеансы перезапустили) — продлеваем секретом сеанса и повторяем.
+        val path = url.encodedPath
+        if (code == 401 && !retried && token() != null && "auth-with-password" !in path && "session/renew" !in path && renew()) {
+            return raw(method, url, body, retried = true)
         }
+        if (code !in 200..299) throw parseError(code, text)
+        return text
     }
 
     private fun parseError(status: Int, text: String): ApiException {
         var message = ""
         val fields = mutableMapOf<String, String>()
+        var twoFactor: String? = null
         runCatching {
             val obj = json.parseToJsonElement(text).jsonObject
             message = obj["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
             obj["data"]?.jsonObject?.forEach { (field, value) ->
                 val code = runCatching { value.jsonObject["code"]?.jsonPrimitive?.contentOrNull }.getOrNull().orEmpty()
-                fields[field] = fieldMessage(field, code)
+                // 2FA: пароль верный, нужен код из письма (в сообщении — куда отправлен)
+                if (field == "twoFactor") twoFactor = runCatching { value.jsonObject["message"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+                    ?.trimEnd('.')?.lowercase() ?: "вашу почту"
+                else fields[field] = fieldMessage(field, code)
             }
         }
+        if (twoFactor != null) return ApiException("Введите код из письма", status, fields, twoFactor)
         val russian = message.trimEnd('.').takeIf { Regex("[а-яё]", RegexOption.IGNORE_CASE).containsMatchIn(it) }
         val text2 = when {
             fields.isNotEmpty() -> fields.values.first()

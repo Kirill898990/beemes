@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.MarkEmailRead
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
@@ -191,7 +193,7 @@ private fun ColorRow(title: String, selected: Color, onPick: (Color) -> Unit) {
 }
 
 @Composable
-private fun Section(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
+internal fun Section(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
         title?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp, top = 8.dp)) }
         Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainer) { Column(content = content) }
@@ -199,7 +201,7 @@ private fun Section(title: String? = null, content: @Composable ColumnScope.() -
 }
 
 @Composable
-private fun RowItem(icon: ImageVector, title: String, subtitle: String? = null, tint: Color = Color.Unspecified, trailing: (@Composable () -> Unit)? = null, onClick: (() -> Unit)? = null) {
+internal fun RowItem(icon: ImageVector, title: String, subtitle: String? = null, tint: Color = Color.Unspecified, trailing: (@Composable () -> Unit)? = null, onClick: (() -> Unit)? = null) {
     Row(
         Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -455,6 +457,7 @@ fun MyProfileScreen(repo: Repository, onBack: () -> Unit) {
 fun SettingsScreen(
     repo: Repository, theme: String, onTheme: (String) -> Unit, onBack: () -> Unit,
     onProfile: () -> Unit, onPassword: () -> Unit, onBlocked: () -> Unit, onAbout: () -> Unit, onSchool: () -> Unit = {},
+    onDevices: () -> Unit = {}, onSecurity: () -> Unit = {},
 ) {
     val me by repo.me.collectAsState()
     val student by repo.school.student.collectAsState()
@@ -508,6 +511,14 @@ fun SettingsScreen(
                 })
             }
             Section("Безопасность") {
+                RowItem(Icons.Filled.Devices, "Устройства", "Где вы вошли · вход по QR-коду", onClick = onDevices)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(start = 56.dp))
+                RowItem(
+                    Icons.Filled.MarkEmailRead, "Почта и 2FA",
+                    when { me?.twoFactor == true -> "Код из письма при входе включён"; me?.verified == true -> "Почта привязана"; else -> "Код из письма при входе" },
+                    onClick = onSecurity,
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(start = 56.dp))
                 RowItem(Icons.Filled.Key, "Сменить пароль", "Ключ шифрования перешифруется новым паролем", onClick = onPassword)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(start = 56.dp))
                 RowItem(Icons.Filled.Block, "Заблокированные", onClick = onBlocked)
@@ -598,7 +609,7 @@ fun PasswordScreen(repo: Repository, onBack: () -> Unit) {
                     if (new != new2) { message = "Пароли не совпадают"; return@Button }
                     busy = true
                     scope.launch {
-                        message = runCatching { repo.changePassword(old, new) }.fold({ "✓ Пароль изменён. На других телефонах нужно войти заново." }, { it.message })
+                        message = runCatching { repo.changePassword(old, new) }.fold({ "✓ Пароль изменён. На других устройствах нужно войти заново." }, { it.message })
                         busy = false
                     }
                 },

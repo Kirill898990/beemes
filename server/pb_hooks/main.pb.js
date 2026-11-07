@@ -41,6 +41,12 @@ onRecordUpdateRequest((e) => {
     e.record.set("keySalt", keySalt)
   }
   e.next()
+  // Пароль сменили — вход на других устройствах завершается (это устройство продлит вход секретом своего сеанса).
+  if (body.password !== undefined) {
+    const S = require(`${__hooks}/security_lib.js`)
+    const others = e.app.findRecordsByFilter("sessions", "user = {:u} && revoked = false && id != {:c}", "", 0, 0, { u: e.record.id, c: S.currentSession(e) })
+    others.forEach((s) => { s.set("revoked", true); e.app.save(s) })
+  }
 }, "users")
 
 // Свой закрытый ключ (зашифрованный паролем) — чтобы читать переписку на новом телефоне.

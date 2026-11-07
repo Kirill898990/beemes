@@ -44,9 +44,9 @@ class MainActivity : ComponentActivity() {
         (intent.getStringExtra(Notifier.EXTRA_CHAT)?.takeIf { it.isNotBlank() } ?: linkOf(intent))?.let { openChat.value = it }
     }
 
-    /** Открыли ссылку beemes (приглашение в группу или канал). */
+    /** Открыли ссылку beemes (приглашение в группу или канал, QR-код входа нового устройства). */
     private fun linkOf(intent: Intent): String? =
-        intent.data?.takeIf { intent.action == Intent.ACTION_VIEW }?.toString()?.takeIf { "#/join/" in it || "#/c/" in it }?.let { "link:$it" }
+        intent.data?.takeIf { intent.action == Intent.ACTION_VIEW }?.toString()?.takeIf { "#/join/" in it || "#/c/" in it || "#/qr/" in it }?.let { "link:$it" }
 
     /** Чат, который нужно открыть (нажали на уведомление). */
     val openChat = MutableStateFlow<String?>(null)

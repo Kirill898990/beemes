@@ -4,7 +4,7 @@
  * но достать его байты из браузера нельзя.
  */
 import * as C from "./crypto.js";
-import { ApiError, api, get, post, patch, del, download, setToken, getToken, url, setSession, getSession, onTokenRenewed } from "./api.js";
+import { ApiError, api, get, post, patch, del, download, setToken, getToken, url, setSession, getSession, onTokenRenewed, renewToken } from "./api.js";
 
 // ---------- События ----------
 const listeners = new Map();
@@ -317,7 +317,8 @@ export async function changePassword(oldPw, newPw) {
   await patch(`api/collections/users/records/${me.id}`, {
     oldPassword: await C.authPassword(me.username, oldPw), password: auth, passwordConfirm: auth, wrappedKey: wrapped, wrapSalt: salt,
   });
-  await login_(me.username, newPw);
+  // Смена пароля обнуляет пропуска; этот сеанс продлевается секретом (без кода из письма), другие сеансы сервер закрыл.
+  if (!(getSession() && await renewToken())) await login_(me.username, newPw);
 }
 
 export async function deleteAccount() {

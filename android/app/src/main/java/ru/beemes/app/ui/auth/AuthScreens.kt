@@ -268,38 +268,139 @@ fun RegisterScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
 }
 
 @Composable
-fun LoginScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
+fun LoginScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit, onQr: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    // 2FA: пароль верный, сервер прислал код на почту (здесь — куда, со звёздочками)
+    var codeTo by rememberSaveable { mutableStateOf<String?>(null) }
+    var code by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var message by remember {
+        mutableStateOf(if (repo.signedOutRemotely.value) "Вход на этом телефоне завершили с другого устройства. Войдите заново." else null)
+    }
+    LaunchedEffect(Unit) { repo.signedOutRemotely.value = false }
     AuthBackground {
         Column(Modifier.fillMaxSize().imePadding()) {
             AuthTop("Вход", onBack)
-            Column(Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { AnimatedEmoji("1f41d", 96.dp) }
-                Field(username, { username = it.lowercase().trim().removePrefix("@") }, "@имя", prefix = "@")
-                Field(password, { password = it }, "Пароль", password = true)
-                Text(
-                    "На новом телефоне переписка восстановится: ключ шифрования откроется вашим паролем.",
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Column(
+                Modifier.fillMaxSize().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { AnimatedEmoji(if (codeTo != null) "1f512" else "1f41d", 96.dp) }
+                if (codeTo == null) {
+                    Field(username, { username = it.lowercase().trim().removePrefix("@") }, "@имя", prefix = "@")
+                    Field(password, { password = it }, "Пароль", password = true)
+                    Text(
+                        "На новом телефоне переписка восстановится: ключ шифрования откроется вашим паролем.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text("Подтвердите вход", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Мы отправили код на $codeTo. Введите его, чтобы войти.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Field(code, { code = it.filter(Char::isDigit).take(6) }, "Код из письма", keyboard = KeyboardType.NumberPassword)
+                }
                 message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Button(
                     onClick = {
                         busy = true; message = null
                         scope.launch {
-                            try { repo.login(username, password); onDone() } catch (e: Exception) { message = e.message ?: "Не получилось войти" }
+                            try {
+                                repo.login(username, password, code)
+                                onDone()
+                            } catch (e: ApiException) {
+                                if (e.twoFactor != null) { codeTo = e.twoFactor; code = "" } else message = e.message
+                            } catch (e: Exception) {
+                                message = e.message ?: "Не получилось войти"
+                            }
                             busy = false
                         }
                     },
-                    enabled = !busy && username.length >= 3 && password.isNotEmpty(),
+                    enabled = !busy && username.length >= 3 && password.isNotEmpty() && (codeTo == null || code.length == 6),
                     modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(),
                 ) {
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                     else Text("Войти", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+                if (codeTo != null) {
+                    androidx.compose.material3.TextButton(onClick = { codeTo = null; code = ""; message = null }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Назад к паролю")
+                    }
+                } else {
+                    OutlinedButton(onClick = onQr, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(18.dp)) {
+                        Text("Войти по QR-коду", fontSize = 16.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Вход по QR-коду: телефон показывает QR, устройство, где вы уже вошли, сканирует его и подтверждает.
+ * Ключ переписки приходит зашифрованным для временного ключа этого телефона — пароль не нужен.
+ */
+@Composable
+fun QrLoginScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
+    var q by remember { mutableStateOf<Repository.QrLogin?>(null) }
+    var status by remember { mutableStateOf("pending") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var round by remember { mutableStateOf(0) }
+    LaunchedEffect(round) {
+        error = null; status = "pending"; q = null
+        val login = try { repo.qrLoginStart() } catch (e: Exception) { error = e.message; return@LaunchedEffect }
+        q = login
+        val until = System.currentTimeMillis() + (login.expiresIn - 5) * 1000L
+        while (System.currentTimeMillis() < until) {
+            delay(2000)
+            try {
+                status = repo.qrLoginPoll(login)
+                if (status == "done") { onDone(); return@LaunchedEffect }
+                if (status == "declined") return@LaunchedEffect
+            } catch (e: ApiException) {
+                if (e.status == 404) break // устарел — новый QR
+                if (e.status != 0) { error = e.message; return@LaunchedEffect }
+            }
+        }
+        round++
+    }
+    AuthBackground {
+        Column(Modifier.fillMaxSize()) {
+            AuthTop("Вход по QR-коду", onBack)
+            Column(
+                Modifier.fillMaxSize().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                val login = q
+                when {
+                    error != null -> {
+                        Text(error!!, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                        OutlinedButton(onClick = { round++ }, shape = RoundedCornerShape(18.dp)) { Text("Новый QR-код") }
+                    }
+                    status == "declined" -> {
+                        Text("Вход отклонён на другом устройстве.", color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(onClick = { round++ }, shape = RoundedCornerShape(18.dp)) { Text("Новый QR-код") }
+                    }
+                    login == null -> CircularProgressIndicator(Modifier.padding(48.dp))
+                    else -> {
+                        Spacer(Modifier.height(4.dp))
+                        ru.beemes.app.ui.profile.QrImage(login.link, 240.dp)
+                        Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("1. Откройте beemes на устройстве, где вы уже вошли")
+                                Text("2. Настройки → Устройства → «Подключить устройство»")
+                                Text("3. Наведите камеру на этот QR-код и подтвердите")
+                            }
+                        }
+                        Text(
+                            "🔒 Ключ переписки придёт зашифрованным прямо для этого телефона.",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
         }

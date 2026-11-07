@@ -60,7 +60,7 @@ private fun AuthFlow(app: BeemesApp, onSignedIn: () -> Unit) {
     val nav = rememberNavController()
     val repo = app.repository
     NavHost(
-        nav, startDestination = "welcome",
+        nav, startDestination = if (repo.signedOutRemotely.value) "login" else "welcome",
         enterTransition = { slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(SLIDE)) + fadeIn(tween(SLIDE)) },
         exitTransition = { fadeOut(tween(SLIDE)) },
         popEnterTransition = { fadeIn(tween(SLIDE)) },
@@ -68,7 +68,8 @@ private fun AuthFlow(app: BeemesApp, onSignedIn: () -> Unit) {
     ) {
         composable("welcome") { WelcomeScreen(onRegister = { nav.navigate("register") }, onLogin = { nav.navigate("login") }) }
         composable("register") { RegisterScreen(repo, onBack = { nav.back() }, onDone = onSignedIn) }
-        composable("login") { LoginScreen(repo, onBack = { nav.back() }, onDone = onSignedIn) }
+        composable("login") { LoginScreen(repo, onBack = { nav.back() }, onDone = onSignedIn, onQr = { nav.navigate("qr-login") }) }
+        composable("qr-login") { ru.beemes.app.ui.auth.QrLoginScreen(repo, onBack = { nav.back() }, onDone = onSignedIn) }
     }
 }
 
@@ -86,8 +87,9 @@ private fun MainFlow(app: BeemesApp, openChat: MutableStateFlow<String?>, onThem
     LaunchedEffect(pendingChat) {
         val id = pendingChat ?: return@LaunchedEffect
         openChat.value = null
-        // Ссылка-приглашение (открыли из браузера/мессенджера) или чат из уведомления.
-        if (id.startsWith("link:")) nav.navigate("join/" + android.net.Uri.encode(id.removePrefix("link:"))) { launchSingleTop = true }
+        // Ссылка-приглашение (открыли из браузера/мессенджера), QR-код входа нового устройства или чат из уведомления.
+        if (id.startsWith("link:") && "#/qr/" in id) nav.navigate("qr/" + android.net.Uri.encode(id.removePrefix("link:"))) { launchSingleTop = true }
+        else if (id.startsWith("link:")) nav.navigate("join/" + android.net.Uri.encode(id.removePrefix("link:"))) { launchSingleTop = true }
         else nav.navigate("chat/$id") {
             popUpTo("chats")
             launchSingleTop = true
@@ -189,7 +191,16 @@ private fun MainFlow(app: BeemesApp, openChat: MutableStateFlow<String?>, onThem
                 onBlocked = { nav.navigate("blocked") },
                 onAbout = { nav.navigate("about") },
                 onSchool = { nav.navigate("school") },
+                onDevices = { nav.navigate("devices") },
+                onSecurity = { nav.navigate("security") },
             )
+        }
+        composable("devices") {
+            ru.beemes.app.ui.profile.DevicesScreen(repo, onBack = { nav.back() }, onQr = { nav.navigate("qr/" + android.net.Uri.encode(it)) })
+        }
+        composable("security") { ru.beemes.app.ui.profile.SecurityScreen(repo, onBack = { nav.back() }) }
+        composable("qr/{link}") { entry ->
+            ru.beemes.app.ui.profile.QrApproveScreen(repo, android.net.Uri.decode(entry.arguments?.getString("link").orEmpty()), onBack = { nav.back() })
         }
         composable("me") { MyProfileScreen(repo, onBack = { nav.back() }) }
         composable("password") { PasswordScreen(repo, onBack = { nav.back() }) }

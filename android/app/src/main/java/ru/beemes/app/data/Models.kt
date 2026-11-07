@@ -18,6 +18,10 @@ data class User(
     val avatar: String = "",
     val accent: String = "",
     val statusEmoji: String = "",
+    /** Почта (видна только самому человеку), подтверждена ли, включена ли 2FA. */
+    val email: String = "",
+    val verified: Boolean = false,
+    val twoFactor: Boolean = false,
     /** Узор из эмодзи на фоне шапки профиля (код Noto). */
     val bgEmoji: String = "",
     val publicKey: String = "",
@@ -144,7 +148,46 @@ data class Block(val id: String = "", val user: String = "", val blocked: String
 data class Page<T>(val page: Int = 1, val totalPages: Int = 1, val totalItems: Int = -1, val items: List<T> = emptyList())
 
 @Serializable
-data class AuthResponse(val token: String = "", val record: User = User())
+data class AuthResponse(val token: String = "", val record: User = User(), val meta: AuthMeta? = null)
+
+@Serializable
+data class SessionSecret(val id: String = "", val secret: String = "")
+
+@Serializable
+data class AuthMeta(val session: SessionSecret? = null, val email: String? = null, val qr: QrPayload? = null)
+
+/** Ключ переписки, зашифрованный телефоном для временного ключа из QR. */
+@Serializable
+data class QrPayload(val e2pub: String = "", val body: String = "", val nonce: String = "")
+
+@Serializable
+data class QrStart(val id: String = "", val secret: String = "", val expiresIn: Int = 180)
+
+/** Ответ «ждём подтверждения» ({status}) или вход ({token, record, meta}). */
+@Serializable
+data class QrPoll(val status: String = "", val token: String = "", val record: User = User(), val meta: AuthMeta? = null)
+
+/** Устройство, где вы вошли (Настройки → Устройства). */
+@Serializable
+data class DeviceSession(
+    val id: String = "", val name: String = "", val platform: String = "", val ip: String = "", val how: String = "",
+    val created: String = "", val lastActive: String = "", val current: Boolean = false,
+)
+
+@Serializable
+data class DeviceList(val items: List<DeviceSession> = emptyList())
+
+@Serializable
+data class Ended(val ended: Int = 0)
+
+@Serializable
+data class EmailSent(val sent: Boolean = false, val to: String = "")
+
+/** QR-код нового устройства: id входа и его временный открытый ключ (base64url). */
+data class QrLink(val id: String, val pub: String)
+
+@Serializable
+data class QrInfo(val name: String = "", val platform: String = "", val ip: String = "", val status: String = "")
 
 @Serializable
 data class Keys(val publicKey: String = "", val encKey: String = "", val keySalt: String = "")

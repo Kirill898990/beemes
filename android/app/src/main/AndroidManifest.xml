@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Уведомления о сообщениях и звонках (Android 13+ спрашивает). -->
@@ -72,5 +73,11 @@
 
         <!-- Фото из уведомлений и для отправки не сохраняются в общие папки. -->
         <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="messages" />
+
+        <!-- Сканер QR-кода (вход на новом устройстве): по умолчанию он только горизонтальный — разрешаем как удобно. -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            tools:replace="screenOrientation" />
     </application>
 </manifest>

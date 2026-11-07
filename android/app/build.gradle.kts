@@ -38,8 +38,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Перед каждой новой версией увеличивайте versionCode на 1.
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     signingConfigs {
@@ -93,6 +93,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.tink)
     implementation(libs.lottie.compose)
+    // Сканер QR-кодов (вход на новом устройстве): ZXing, Apache 2.0
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

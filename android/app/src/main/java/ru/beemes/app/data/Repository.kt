@@ -14,8 +14,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import ru.beemes.app.BuildConfig
 import java.io.File
 import java.time.Instant
@@ -31,8 +34,10 @@ class Repository(private val context: Context) {
     private val vault = Vault(context)
     /** Учебный профиль «Простой химии» (оценки). */
     val school = School(context, vault)
-    private var token: String? = prefs.getString("token", null)
-    val api = Api(BuildConfig.SERVER_URL) { token }
+    @Volatile private var token: String? = prefs.getString("token", null)
+    /** Сеанс этого устройства: id и секрет. Секретом приложение само продлевает вход (Настройки → Устройства). */
+    @Volatile private var session: SessionSecret? = prefs.getString("device_session", null)?.let { runCatching { kotlinx.serialization.json.Json.decodeFromString(SessionSecret.serializer(), it) }.getOrNull() }
+    val api = Api(BuildConfig.SERVER_URL, token = { token }, headers = ::deviceHeaders, renew = ::renewToken)
     private val json get() = api.json
 
     private var privateKey: ByteArray? = vault.get("private_key")
@@ -89,12 +94,18 @@ class Repository(private val context: Context) {
         login(login, password)
     }
 
-    /** Вход (и на новом телефоне): закрытый ключ скачивается и расшифровывается паролем. */
-    suspend fun login(username: String, password: String) {
+    /**
+     * Вход (и на новом телефоне): закрытый ключ скачивается и расшифровывается паролем.
+     * Включена 2FA — сервер просит код из письма (ApiException.twoFactor), тогда вход повторяется с code.
+     */
+    suspend fun login(username: String, password: String, code: String = "") {
         val login = username.trim().lowercase().removePrefix("@")
         val auth = api.send(
             "POST", "api/collections/users/auth-with-password", AuthResponse.serializer(),
-            buildJsonObject { put("identity", login); put("password", Crypto.authPassword(login, password)) },
+            buildJsonObject {
+                put("identity", login); put("password", Crypto.authPassword(login, password))
+                if (code.isNotBlank()) put("code", code.trim())
+            },
         )
         token = auth.token
         val keys = try {
@@ -112,17 +123,24 @@ class Repository(private val context: Context) {
         check(Crypto.b64(Crypto.publicFromPrivate(priv)) == keys.publicKey) { "Ключи не совпадают" }
         privateKey = priv
         vault.put("private_key", priv)
+        keepDeviceSession(auth.meta?.session)
         saveSession(auth.token, auth.record)
     }
 
     fun logout() {
-        // Сразу «не в сети» (вход уже забыт — поэтому он в самом сигнале).
-        token?.let { t -> scope.launch { presence(false, withToken = t) } }
+        // Сразу «не в сети» и закрыть сеанс этого устройства (вход уже забыт — поэтому пропуск передаём явно).
+        val t = token
+        val s = session
+        if (t != null) scope.launch {
+            presence(false, withToken = t)
+            if (s != null) runCatching { endOwnSession(t, s.id) }
+        }
         realtime.stop()
         school.disconnect()
         token = null
         privateKey = null
         vault.clear()
+        session = null
         prefs.edit().clear().apply()
         _me.value = null
         _chats.value = emptyList()
@@ -143,6 +161,142 @@ class Repository(private val context: Context) {
     suspend fun refreshMe() {
         val r = api.send("POST", "api/collections/users/auth-refresh", AuthResponse.serializer())
         saveSession(r.token, r.record)
+    }
+
+    // ---------- Сеанс этого устройства ----------
+
+    /** Как называется телефон — его видно в «Устройствах» на других ваших устройствах. */
+    val deviceName: String by lazy {
+        val maker = android.os.Build.MANUFACTURER.orEmpty().replaceFirstChar { it.uppercase() }
+        val model = android.os.Build.MODEL.orEmpty()
+        (if (model.startsWith(maker, ignoreCase = true)) model else "$maker $model").trim().ifBlank { "Android" }
+    }
+
+    private fun deviceHeaders(): Map<String, String> {
+        // В заголовках нельзя кириллицу — название закодировано (сервер раскодирует).
+        val name = java.net.URLEncoder.encode(deviceName, "UTF-8").replace("+", "%20")
+        val h = mutableMapOf("X-BM-Device" to "android|$name")
+        session?.let { h["X-BM-Session"] = it.id }
+        return h
+    }
+
+    private fun keepDeviceSession(s: SessionSecret?) {
+        if (s == null || s.id.isBlank() || s.secret.isBlank()) return
+        session = s
+        prefs.edit().putString("device_session", json.encodeToString(SessionSecret.serializer(), s)).apply()
+    }
+
+    /** Вошли до появления сеансов — заводим сеанс этого телефона (один раз). */
+    suspend fun ensureDeviceSession() {
+        if (session != null || token == null) return
+        runCatching { keepDeviceSession(api.send("POST", "api/bm/session/create", SessionSecret.serializer())) }
+    }
+
+    private val renewLock = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Пропуск перестал действовать (например, на другом устройстве нажали «Завершить другие сеансы»).
+     * Продлеваем секретом сеанса. Этот сеанс сами завершили — выходим из аккаунта на этом телефоне.
+     */
+    private suspend fun renewToken(): Boolean {
+        val stale = token
+        return renewLock.withLock {
+            if (token != stale) return@withLock token != null // пока ждали, вход уже продлили
+            val s = session ?: return@withLock false
+            try {
+                val r = api.send("POST", "api/bm/session/renew", AuthResponse.serializer(), buildJsonObject { put("id", s.id); put("secret", s.secret) })
+                if (token == stale && _me.value != null) saveSession(r.token, r.record)
+                true
+            } catch (e: ApiException) {
+                if (e.status == 401 && token == stale) {
+                    kotlinx.coroutines.withContext(Dispatchers.Main) { logout() }
+                    signedOutRemotely.value = true
+                }
+                false
+            }
+        }
+    }
+
+    /** Вход на этом телефоне закрыли с другого устройства — экран входа покажет пояснение. */
+    val signedOutRemotely = MutableStateFlow(false)
+
+    private suspend fun endOwnSession(t: String, id: String) {
+        // X-BM-Session — «это мой сеанс»: сервер закроет только его, не трогая вход на других устройствах
+        val request = okhttp3.Request.Builder().url(api.url("api/bm/sessions/$id/end"))
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .header("Authorization", t).header("X-BM-Session", id).build()
+        kotlinx.coroutines.withContext(Dispatchers.IO) { api.client.newCall(request).execute().close() }
+    }
+
+    // ---------- Устройства, вход по QR-коду, почта и 2FA ----------
+
+    suspend fun sessions(): List<DeviceSession> = api.get("api/bm/sessions", DeviceList.serializer()).items
+
+    suspend fun endSession(id: String) { api.sendRaw("POST", "api/bm/sessions/$id/end") }
+
+    suspend fun endOtherSessions(): Int = api.send("POST", "api/bm/sessions/end-others", Ended.serializer()).ended
+
+    /** Ссылка из QR-кода нового устройства: …/web/#/qr/<id>/<временный ключ>. */
+    fun parseQr(text: String): QrLink? {
+        val m = Regex("#/qr/([a-z0-9]{10,40})/([A-Za-z0-9_-]{43})").find(text) ?: return null
+        return QrLink(m.groupValues[1], m.groupValues[2])
+    }
+
+    suspend fun qrInfo(id: String): QrInfo = api.get("api/bm/qr/$id", QrInfo.serializer())
+
+    /** Подтвердить вход на новом устройстве: ключ переписки уходит зашифрованным для ключа из QR (сервер его не видит). */
+    suspend fun qrApprove(link: QrLink) {
+        val priv = privateKey ?: throw ApiException("Нужно войти заново")
+        val sealed = Crypto.qrSeal(Crypto.unb64url(link.pub), link.id, priv)
+        api.sendRaw("POST", "api/bm/qr/${link.id}/approve", buildJsonObject {
+            put("e2pub", sealed.e2pub); put("body", sealed.body); put("nonce", sealed.nonce)
+        })
+    }
+
+    suspend fun qrDecline(id: String) { api.sendRaw("POST", "api/bm/qr/$id/decline") }
+
+    /** Вход на этом телефоне по QR-коду: его сканирует устройство, где вы уже вошли. */
+    class QrLogin(val id: String, val link: String, val expiresIn: Int, internal val secret: String, internal val eph: Crypto.Identity)
+
+    suspend fun qrLoginStart(): QrLogin {
+        val eph = Crypto.newIdentity()
+        val r = api.send("POST", "api/bm/qr/start", QrStart.serializer(), buildJsonObject { put("pub", Crypto.b64(eph.publicKey)) })
+        return QrLogin(r.id, "$siteUrl/web/#/qr/${r.id}/${Crypto.b64url(eph.publicKey)}", r.expiresIn, r.secret, eph)
+    }
+
+    /** → "pending" (ждём), "declined" (отклонили) или "done" (вошли). */
+    suspend fun qrLoginPoll(q: QrLogin): String {
+        val r = api.send("POST", "api/bm/qr/${q.id}/poll", QrPoll.serializer(), buildJsonObject { put("secret", q.secret) })
+        if (r.token.isBlank()) return r.status.ifBlank { "pending" }
+        val p = r.meta?.qr ?: throw ApiException("Ключ не пришёл — попробуйте ещё раз")
+        val raw = runCatching { Crypto.qrOpen(q.eph.privateKey, p.e2pub, q.id, p.body, p.nonce) }.getOrNull()
+        if (raw == null || Crypto.b64(Crypto.publicFromPrivate(raw)) != r.record.publicKey) throw ApiException("Ключ не подошёл — попробуйте ещё раз")
+        privateKey = raw
+        vault.put("private_key", raw)
+        keepDeviceSession(r.meta.session)
+        saveSession(r.token, r.record)
+        return "done"
+    }
+
+    /** Привязать почту: письмо с кодом → куда отправили (адрес со звёздочками). */
+    suspend fun emailStart(email: String): String = api.send("POST", "api/bm/email/start", EmailSent.serializer(), buildJsonObject { put("email", email.trim()) }).to
+
+    suspend fun emailConfirm(code: String) {
+        // почта сменилась — сервер обнулил пропуска и сразу выдал новый
+        val r = api.send("POST", "api/bm/email/confirm", AuthResponse.serializer(), buildJsonObject { put("code", code.trim()) })
+        saveSession(r.token, r.record)
+    }
+
+    suspend fun emailRemove(password: String) {
+        val me = _me.value ?: return
+        val r = api.send("POST", "api/bm/email/remove", AuthResponse.serializer(), buildJsonObject { put("password", Crypto.authPassword(me.username, password)) })
+        saveSession(r.token, r.record)
+    }
+
+    suspend fun setTwoFactor(enabled: Boolean, password: String) {
+        val me = _me.value ?: return
+        api.sendRaw("POST", "api/bm/2fa", buildJsonObject { put("enabled", enabled); put("password", Crypto.authPassword(me.username, password)) })
+        saveSession(token!!, me.copy(twoFactor = enabled))
     }
 
     // ---------- Профили ----------
@@ -205,7 +359,8 @@ class Repository(private val context: Context) {
                 put("wrappedKey", wrapped); put("wrapSalt", salt)
             },
         )
-        login(me.username, new)
+        // Смена пароля обнуляет пропуска: этот сеанс продлеваем секретом (без кода из письма), другие сервер закрыл.
+        if (session == null || !renewToken()) login(me.username, new)
     }
 
     suspend fun deleteAccount() {
@@ -863,6 +1018,7 @@ class Repository(private val context: Context) {
         runCatching {
             api.sendRaw("POST", "api/bm/presence", buildJsonObject {
                 put("state", if (online) "online" else "offline"); put("device", deviceId); put("seq", seq)
+                session?.let { put("session", it.id) }
                 if (withToken != null) put("token", t)
             })
         }

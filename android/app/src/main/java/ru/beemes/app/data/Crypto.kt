@@ -162,6 +162,23 @@ object Crypto {
     fun unwrapGroupKey(myPrivate: ByteArray, fromPublic: ByteArray, chatId: String, epoch: Int, userId: String, body: String, nonce: String): ByteArray =
         open(groupWrapKey(myPrivate, fromPublic, chatId, epoch), body, nonce, "$chatId|$epoch|$userId")
 
+    // ---------- Вход по QR-коду ----------
+    // Новое устройство показывает в QR временный открытый ключ. Телефон шифрует для него ключ переписки:
+    // X25519(временный ключ телефона, ключ из QR) → HKDF(соль «qr|id») → AES-GCM. Так же делает сайт.
+    private val QR_INFO = "beemes-qr-v1".toByteArray()
+    class QrSealed(val e2pub: String, val body: String, val nonce: String)
+    fun qrSeal(theirPublic: ByteArray, id: String, raw: ByteArray): QrSealed {
+        val e2 = newIdentity()
+        val key = Hkdf.computeHkdf("HMACSHA256", X25519.computeSharedSecret(e2.privateKey, theirPublic), "qr|$id".toByteArray(), QR_INFO, 32)
+        val sealed = seal(key, raw, id)
+        return QrSealed(b64(e2.publicKey), sealed.body, sealed.nonce)
+    }
+    /** Новое устройство открывает ключ переписки своим временным закрытым ключом. */
+    fun qrOpen(myPrivate: ByteArray, e2pub: String, id: String, body: String, nonce: String): ByteArray {
+        val key = Hkdf.computeHkdf("HMACSHA256", X25519.computeSharedSecret(myPrivate, unb64(e2pub)), "qr|$id".toByteArray(), QR_INFO, 32)
+        return open(key, body, nonce, id)
+    }
+
     fun b64url(bytes: ByteArray) = b64(bytes).replace('+', '-').replace('/', '_').trimEnd('=')
     fun unb64url(text: String) = unb64(text.replace('-', '+').replace('_', '/').let { it + "=".repeat((4 - it.length % 4) % 4) })
 }

@@ -58,6 +58,7 @@ class BeemesApp : Application() {
             }
         }
         registerPush()
+        repository.scope.launch { repository.ensureDeviceSession() }
     }
 
     fun registerPush() {
