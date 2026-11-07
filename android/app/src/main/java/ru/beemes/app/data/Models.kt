@@ -78,6 +78,9 @@ data class ChatState(
     val readAt: String = "",
     val muted: Boolean = false,
     val hidden: Boolean = false,
+    /** Фон чата (личный): "" — соты, "p:<имя>" — готовый, "photo:<nonce>.<шифр>" — своё фото. */
+    val wallpaper: String = "",
+    val wallpaperFile: String = "",
 )
 
 @Serializable

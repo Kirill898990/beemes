@@ -1,7 +1,7 @@
 /* Переписка: сообщения, фото, ответы, правка, живые эмодзи, звонки. */
 import {
   h, icon, iconButton, avatar, nameWithStatus, lastSeenText, isOnline, timeOfDay, dayTitle, richText, bigEmoji, animoji,
-  emojiGroups, popupMenu, modal, toast, disposeEmoji, accentOf, accentVars, titleOf,
+  emojiGroups, popupMenu, modal, toast, disposeEmoji, accentOf, accentVars, titleOf, WALLPAPERS, wallpaperStyle,
 } from "../ui.js";
 import * as store from "../store.js";
 import { callTitle, preview } from "./chats.js";
@@ -41,7 +41,16 @@ export function chatView(root, { chatId, go }) {
     iconButton("back", "К чатам", () => go("#/"), { class: "only-narrow" }),
     who,
     iconButton("video", "Видеозвонок", () => startCall(chatId, true)),
-    iconButton("phone", "Позвонить", () => startCall(chatId, false)));
+    iconButton("phone", "Позвонить", () => startCall(chatId, false)),
+    iconButton("more", "Ещё", (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      const item = store.chatItem(chatId);
+      popupMenu(r.right - 220, r.bottom + 4, [
+        { icon: "palette", label: "Фон чата", onclick: wallpaperPicker },
+        { icon: item && item.muted ? "bell" : "belloff", label: item && item.muted ? "Включить звук" : "Без звука", onclick: () => store.setMuted(chatId, !(item && item.muted)).catch((x) => toast(x.message)) },
+        { icon: "lock", label: "Код безопасности", onclick: () => go(`#/safety/${chatId}`) },
+      ]);
+    }));
   const renderWho = () => {
     if (!peer) return;
     const p = store.state.users.get(peer.id) || peer;
@@ -53,6 +62,47 @@ export function chatView(root, { chatId, go }) {
   // ---------- Сообщения ----------
   const list = h("div", { class: "messages", role: "log", "aria-live": "polite", "aria-label": "Сообщения" });
   const scroller = h("div", { class: "scroller" }, list);
+
+  // ---------- Фон чата ----------
+  let shownWallpaper = null;
+  async function applyWallpaper() {
+    const value = store.wallpaperOf(chatId);
+    if (value === shownWallpaper) return;
+    shownWallpaper = value;
+    let photoUrl = null;
+    if (value.startsWith("photo:")) photoUrl = await store.wallpaperPhoto(chatId).catch(() => null);
+    if (disposed || store.wallpaperOf(chatId) !== value) return;
+    scroller.removeAttribute("style");
+    const st = wallpaperStyle(value, photoUrl);
+    if (st) Object.entries(st).forEach(([k, v]) => scroller.style.setProperty(k, v));
+    scroller.classList.toggle("has-wallpaper", !!st);
+    scroller.classList.toggle("photo-wallpaper", !!photoUrl);
+  }
+  function wallpaperPicker() {
+    const current = store.wallpaperOf(chatId);
+    const pick = async (v) => { dlg.close(); try { await store.setWallpaper(chatId, v); } catch (e) { toast(e.message); } };
+    const file = h("input", { type: "file", accept: "image/*", hidden: true });
+    file.onchange = async () => {
+      const f = file.files[0];
+      if (!f) return;
+      dlg.close();
+      let prepared;
+      try { prepared = await preparePhoto(f); } catch (_) { toast("Не получилось открыть это фото"); return; }
+      URL.revokeObjectURL(prepared.url);
+      toast("Ставим фон…", 1500);
+      try { await store.setWallpaperPhoto(chatId, prepared); } catch (e) { toast(e.message); }
+    };
+    const tile = (value, label, style, extra) => h("button", {
+      type: "button", class: "wp-item" + (current === value ? " selected" : "") + (extra || ""), style, "aria-label": label, "aria-pressed": current === value ? "true" : "false",
+      onclick: () => pick(value),
+    }, h("span", {}, label));
+    const grid = h("div", { class: "wp-grid" },
+      tile("", "Соты", null, " wp-default"),
+      WALLPAPERS.map((w) => tile("p:" + w.id, w.name, wallpaperStyle("p:" + w.id))),
+      h("button", { type: "button", class: "wp-item wp-photo" + (current.startsWith("photo:") ? " selected" : ""), onclick: () => file.click() }, icon("image", 28), h("span", {}, "Своё фото")),
+      file);
+    const dlg = modal("Фон чата", h("div", {}, h("p", { class: "muted small" }, "Фон этого чата видите только вы. Своё фото шифруется, как фото в переписке."), grid), [{ label: "Закрыть" }], { class: "wp-modal" });
+  }
 
   function bubble(m) {
     const mine = m.senderId === me.id;
@@ -301,6 +351,8 @@ export function chatView(root, { chatId, go }) {
   const offs = [
     store.on("messages:" + chatId, () => render()),
     store.on("users", renderWho),
+    store.on("wallpaper:" + chatId, applyWallpaper),
+    store.on("chats", applyWallpaper),
   ];
   const onFocus = () => store.markRead(chatId).catch(() => {});
   window.addEventListener("focus", onFocus);
@@ -309,6 +361,7 @@ export function chatView(root, { chatId, go }) {
       const c = await store.chat(chatId);
       peer = await store.user(store.peerOf(c), true);
       renderWho();
+      applyWallpaper();
       if (store.messagesOf(chatId).length) render(true);
       hasMore = await store.loadMessages(chatId);
       if (disposed) return;

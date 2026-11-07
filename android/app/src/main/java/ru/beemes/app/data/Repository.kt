@@ -125,6 +125,7 @@ class Repository(private val context: Context) {
         _chats.value = emptyList()
         messageFlows.clear(); chatCache.clear(); keyCache.clear(); myStates.clear(); peerRead.clear()
         _users.value = emptyMap()
+        _wallpapers.value = emptyMap()
         photoCache.evictAll()
         File(context.cacheDir, "photos").deleteRecursively()
     }
@@ -226,7 +227,7 @@ class Repository(private val context: Context) {
             api.get("api/collections/chat_state/records", Page.serializer(ChatState.serializer()), mapOf("perPage" to "500")).items
         }.getOrDefault(emptyList())
         states.forEach { s ->
-            if (s.user == me.id) myStates[s.chat] = s else parseTime(s.readAt)?.let { peerRead[s.chat] = it }
+            if (s.user == me.id) rememberState(s) else parseTime(s.readAt)?.let { peerRead[s.chat] = it }
         }
         list.forEach { c ->
             chatCache[c.id] = c
@@ -268,6 +269,62 @@ class Repository(private val context: Context) {
 
     fun peerReadAt(chatId: String): Instant? = peerRead[chatId]
 
+    // ---------- Фон чата (личный: собеседник его не видит) ----------
+
+    private val _wallpapers = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Фон каждого чата: "" — соты, "p:<имя>" — готовый, "photo:…" — своё фото. */
+    val wallpapers: StateFlow<Map<String, String>> = _wallpapers.asStateFlow()
+
+    private fun rememberState(s: ChatState) {
+        myStates[s.chat] = s
+        if (_wallpapers.value[s.chat] != s.wallpaper) _wallpapers.update { it + (s.chat to s.wallpaper) }
+    }
+
+    /** Ключ для своего фото-фона: свой закрытый ключ + свой открытый (как на сайте). */
+    private fun selfKey(chatId: String): ByteArray {
+        val me = _me.value ?: throw ApiException("Нужно войти")
+        val priv = privateKey ?: throw ApiException("Нужно войти")
+        return Crypto.chatKey(priv, Crypto.unb64(me.publicKey), "wallpaper|$chatId")
+    }
+
+    /** Готовый фон ("p:<имя>") или обычный (""). */
+    suspend fun setWallpaper(chatId: String, value: String) =
+        saveState(chatId) { put("wallpaper", value); put("wallpaperFile", kotlinx.serialization.json.JsonNull) }
+
+    /** Своё фото: шифруем, ключ от фото шифруем своим ключом — сервер видит только шифр. */
+    suspend fun setWallpaperPhoto(chatId: String, uri: Uri) {
+        val me = _me.value ?: return
+        val photo = Photos.prepare(context, uri)
+        val (blob, key) = Crypto.encryptFile(photo.jpeg)
+        val content = buildJsonObject { put("k", Crypto.b64(key)) }.toString().toByteArray()
+        val sealed = Crypto.seal(selfKey(chatId), content, "wallpaper|$chatId|${me.id}")
+        if (myStates[chatId] == null) saveState(chatId) {}
+        val id = myStates[chatId]?.id ?: return
+        val value = "photo:${sealed.nonce}.${sealed.body}"
+        BitmapFactory.decodeByteArray(photo.jpeg, 0, photo.jpeg.size)?.let { photoCache.put("wp:$value", it) }
+        val saved = api.multipart(
+            "PATCH", "api/collections/chat_state/records/$id", ChatState.serializer(),
+            mapOf("wallpaper" to value), mapOf("wallpaperFile" to Triple("wallpaper.bin", "application/octet-stream", blob)),
+        )
+        rememberState(saved)
+    }
+
+    /** Своё фото-фон этого чата (расшифрованное) или null. */
+    suspend fun wallpaperPhoto(chatId: String): Bitmap? {
+        val st = myStates[chatId] ?: return null
+        if (!st.wallpaper.startsWith("photo:") || st.wallpaperFile.isBlank()) return null
+        photoCache.get("wp:${st.wallpaper}")?.let { return it }
+        val me = _me.value ?: return null
+        val parts = st.wallpaper.removePrefix("photo:").split(".", limit = 2)
+        if (parts.size != 2) return null
+        val opened = String(Crypto.open(selfKey(chatId), parts[1], parts[0], "wallpaper|$chatId|${me.id}"))
+        val k = (json.parseToJsonElement(opened) as kotlinx.serialization.json.JsonObject)["k"]
+            ?.let { (it as kotlinx.serialization.json.JsonPrimitive).content } ?: return null
+        val blob = api.download(api.url("api/files/chat_state/${st.id}/${st.wallpaperFile}", mapOf("token" to fileToken())))
+        val bytes = Crypto.decryptFile(blob, Crypto.unb64(k))
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.also { photoCache.put("wp:${st.wallpaper}", it) }
+    }
+
     suspend fun setMuted(chatId: String, muted: Boolean) {
         saveState(chatId) { put("muted", muted) }
         _chats.update { l -> l.map { if (it.chat.id == chatId) it.copy(muted = muted) else it } }
@@ -298,7 +355,7 @@ class Repository(private val context: Context) {
                 put("chat", chatId); put("user", me.id); body()
             })
         }
-        myStates[chatId] = saved
+        rememberState(saved)
     }
 
     // ---------- Сообщения ----------
@@ -463,7 +520,7 @@ class Repository(private val context: Context) {
     }
 
     internal fun applyState(s: ChatState) {
-        if (s.user == _me.value?.id) { myStates[s.chat] = s; return }
+        if (s.user == _me.value?.id) { rememberState(s); return }
         val read = parseTime(s.readAt) ?: return
         peerRead[s.chat] = read
         messageFlows[s.chat]?.update { l ->

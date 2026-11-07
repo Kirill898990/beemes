@@ -43,6 +43,7 @@ const P = {
   shield: "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z",
   block: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.902 7.902 0 0 1 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1A7.902 7.902 0 0 1 20 12c0 4.42-3.58 8-8 8z",
   bell: "M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z",
+  palette: "M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z",
   belloff: "M20 18.69L7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.3.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z",
   moon: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z",
   key: "M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z",
@@ -268,6 +269,31 @@ function linkify(text) {
 export function nameWithStatus(user, emojiSize = 20) {
   const code = statusCode(user && user.statusEmoji);
   return h("span", { class: "name-status" }, h("span", { class: "name" }, titleOf(user)), code ? animoji(code, emojiSize) : null);
+}
+
+// ---------- Фоны чатов ----------
+/** Готовые фоны: градиент и соты поверх. Те же имена в приложении для Android. */
+export const WALLPAPERS = [
+  { id: "sunset", name: "Закат", a: "#FFB25B", b: "#FF5E8A" },
+  { id: "ocean", name: "Океан", a: "#3D8BFF", b: "#36D1C4" },
+  { id: "mint", name: "Мята", a: "#9BEFC8", b: "#2BB673" },
+  { id: "lavender", name: "Лаванда", a: "#C7B6FF", b: "#7D5CFF" },
+  { id: "sakura", name: "Сакура", a: "#FFD0E2", b: "#FF7EB3" },
+  { id: "sky", name: "Небо", a: "#CDEBFF", b: "#7FB2FF" },
+  { id: "peach", name: "Персик", a: "#FFE0C2", b: "#FF9F7A" },
+  { id: "sand", name: "Песок", a: "#FBEBC4", b: "#E6BC6E" },
+  { id: "forest", name: "Лес", a: "#3E7D5C", b: "#163828" },
+  { id: "night", name: "Ночь", a: "#352B5A", b: "#0E0B19" },
+  { id: "berry", name: "Ягоды", a: "#8E2D6B", b: "#2A0E2F" },
+  { id: "graphite", name: "Графит", a: "#55555F", b: "#1C1C22" },
+];
+const COMB = (color) => `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='42' height='72.75' viewBox='0 0 56 97'%3E%3Cpath d='M28 1 54 16v30L28 61 2 46V16z M28 61v36' fill='none' stroke='${color}' stroke-opacity='.16' stroke-width='2.4'/%3E%3C/svg%3E")`;
+/** CSS фона по значению wallpaper ("p:<имя>"); photoUrl — расшифрованное своё фото. null — обычный фон. */
+export function wallpaperStyle(value, photoUrl) {
+  if (photoUrl) return { "background-image": `url("${photoUrl}")`, "background-size": "cover", "background-position": "center" };
+  const w = WALLPAPERS.find((x) => "p:" + x.id === value);
+  if (!w) return null;
+  return { "background-image": `${COMB("%23FFFFFF")}, linear-gradient(160deg, ${w.a}, ${w.b})`, "background-size": "42px 72.75px, cover", "background-attachment": "local, fixed" };
 }
 
 // ---------- Окна, подсказки, меню ----------

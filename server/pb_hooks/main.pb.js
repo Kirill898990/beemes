@@ -124,6 +124,13 @@ onRecordEnrich((e) => {
   e.next()
 }, "users")
 
+// Фон чата — личный: собеседник видит ваши «прочитано» и «без звука», но не ваш фон.
+onRecordEnrich((e) => {
+  const me = e.requestInfo && e.requestInfo.auth
+  if (!me || me.id !== e.record.getString("user")) e.record.hide("wallpaper", "wallpaperFile")
+  e.next()
+}, "chat_state")
+
 // ---------- Чаты ----------
 
 // Один чат на пару людей: если он уже есть, отвечаем им же.

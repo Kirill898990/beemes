@@ -48,6 +48,10 @@ import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
@@ -202,6 +206,17 @@ fun ChatScreen(
             photoToSend = runCatching { withContext(Dispatchers.IO) { repo.preparePhoto(uri) } }.getOrElse { error = it.message; null }
         }
     }
+    // Фон чата (свой для каждого чата)
+    val wallpapers by repo.wallpapers.collectAsState()
+    val wallpaper = wallpapers[chatId].orEmpty()
+    var wallpaperOpen by remember { mutableStateOf(false) }
+    val chats by repo.chats.collectAsState()
+    val muted = chats.firstOrNull { it.chat.id == chatId }?.muted == true
+    val pickWallpaper = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch {
+            runCatching { withContext(Dispatchers.IO) { repo.setWallpaperPhoto(chatId, uri) } }.onFailure { error = it.message }
+        }
+    }
 
     fun send() {
         val t = text.trim()
@@ -217,9 +232,14 @@ fun ChatScreen(
 
     val myAccent = Accent.forUser(me?.accent.orEmpty(), me?.id.orEmpty())
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()) {
-        ChatTopBar(peer, onBack, { peer?.let { onOpenProfile(it.id) } }, onCall)
+        ChatTopBar(
+            peer, onBack, { peer?.let { onOpenProfile(it.id) } }, onCall,
+            muted = muted,
+            onWallpaper = { wallpaperOpen = true },
+            onMute = { scope.launch { runCatching { repo.setMuted(chatId, !muted) }.onFailure { error = it.message } } },
+        )
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            Honeycomb(Modifier.fillMaxSize())
+            ChatWallpaper(repo, chatId, wallpaper, Modifier.fillMaxSize())
             val items = remember(messages) { buildItems(messages) }
             if (messages.isEmpty() && !hasMore) {
                 EmptyChat(peer) { e -> scope.launch { repo.sendText(chatId, e) } }
@@ -289,6 +309,14 @@ fun ChatScreen(
             }
         }
     }
+    if (wallpaperOpen) {
+        WallpaperSheet(
+            current = wallpaper,
+            onPick = { v -> wallpaperOpen = false; scope.launch { runCatching { repo.setWallpaper(chatId, v) }.onFailure { error = it.message } } },
+            onPhoto = { wallpaperOpen = false; pickWallpaper.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onDismiss = { wallpaperOpen = false },
+        )
+    }
     viewer?.let { m -> PhotoViewer(repo, m) { viewer = null } }
     photoToSend?.let { p ->
         SendPhotoDialog(p, onDismiss = { photoToSend = null }) { caption ->
@@ -319,7 +347,11 @@ private fun buildItems(messages: List<Msg>): List<Item> {
 }
 
 @Composable
-private fun ChatTopBar(peer: User?, onBack: () -> Unit, onProfile: () -> Unit, onCall: (Boolean) -> Unit) {
+private fun ChatTopBar(
+    peer: User?, onBack: () -> Unit, onProfile: () -> Unit, onCall: (Boolean) -> Unit,
+    muted: Boolean = false, onWallpaper: () -> Unit = {}, onMute: () -> Unit = {},
+) {
+    var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, shadowElevation = 2.dp) {
         Row(
             Modifier.fillMaxWidth().statusBarsPadding().height(60.dp).padding(end = 4.dp),
@@ -337,6 +369,20 @@ private fun ChatTopBar(peer: User?, onBack: () -> Unit, onProfile: () -> Unit, o
             }
             IconButton(onClick = { onCall(true) }) { Icon(Icons.Filled.Videocam, "Видеозвонок") }
             IconButton(onClick = { onCall(false) }) { Icon(Icons.Filled.Call, "Позвонить") }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Ещё") }
+                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Фон чата") }, leadingIcon = { Icon(Icons.Filled.Palette, null) },
+                        onClick = { menu = false; onWallpaper() },
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(if (muted) "Включить звук" else "Без звука") },
+                        leadingIcon = { Icon(if (muted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff, null) },
+                        onClick = { menu = false; onMute() },
+                    )
+                }
+            }
         }
     }
 }

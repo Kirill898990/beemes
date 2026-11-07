@@ -230,6 +230,8 @@ export async function logout() {
   [chatCache, keyCache, myStates, peerRead, messages].forEach((m) => m.clear());
   photoUrls.forEach((u) => URL.revokeObjectURL(u));
   photoUrls.clear();
+  wallpaperUrls.forEach((u) => URL.revokeObjectURL(u));
+  wallpaperUrls.clear();
   emit("me", null);
   flushDesktop();
 }
@@ -459,6 +461,45 @@ async function saveState(chatId, fields) {
   myStates.set(chatId, saved);
 }
 
+// ---------- Фон чата (личный: собеседник его не видит) ----------
+export const wallpaperOf = (chatId) => (myStates.get(chatId) || {}).wallpaper || "";
+const wallpaperUrls = new Map();
+const selfKey = (chatId) => C.chatKey(state.privateKey, C.unb64(state.me.publicKey), "wallpaper|" + chatId);
+const wallpaperAad = (chatId) => new TextEncoder().encode(`wallpaper|${chatId}|${state.me.id}`);
+
+/** Готовый фон ("p:<имя>") или обычный (""). */
+export async function setWallpaper(chatId, value) {
+  await saveState(chatId, { wallpaper: value, wallpaperFile: null });
+  emit("wallpaper:" + chatId);
+}
+
+/** Своё фото: шифруем, ключ от фото шифруем своим ключом — сервер видит только шифр. */
+export async function setWallpaperPhoto(chatId, prepared) {
+  const { blob, key } = await C.encryptFile(prepared.jpeg);
+  const sealed = await C.seal(await selfKey(chatId), { k: C.b64(key) }, wallpaperAad(chatId));
+  if (!myStates.get(chatId)) await saveState(chatId, {});
+  const form = new FormData();
+  form.append("wallpaper", `photo:${sealed.nonce}.${sealed.body}`);
+  form.append("wallpaperFile", new Blob([blob], { type: "application/octet-stream" }), "wallpaper.bin");
+  const saved = await api("PATCH", `api/collections/chat_state/records/${myStates.get(chatId).id}`, { body: form });
+  myStates.set(chatId, saved);
+  wallpaperUrls.set(saved.wallpaper, URL.createObjectURL(new Blob([prepared.jpeg], { type: "image/jpeg" })));
+  emit("wallpaper:" + chatId);
+}
+
+/** Своё фото этого чата → адрес картинки (или null). */
+export async function wallpaperPhoto(chatId) {
+  const st = myStates.get(chatId);
+  if (!st || !String(st.wallpaper || "").startsWith("photo:") || !st.wallpaperFile) return null;
+  if (wallpaperUrls.has(st.wallpaper)) return wallpaperUrls.get(st.wallpaper);
+  const [nonce, body] = st.wallpaper.slice(6).split(".");
+  const { k } = await C.open(await selfKey(chatId), body, nonce, wallpaperAad(chatId));
+  const blob = await download(`api/files/chat_state/${st.id}/${st.wallpaperFile}`, { token: await token90() });
+  const u = URL.createObjectURL(new Blob([await C.decryptFile(blob, C.unb64(k))], { type: "image/jpeg" }));
+  wallpaperUrls.set(st.wallpaper, u);
+  return u;
+}
+
 export async function setMuted(chatId, muted) {
   await saveState(chatId, { muted });
   state.chats = state.chats.map((i) => (i.chat.id === chatId ? { ...i, muted } : i));
@@ -656,7 +697,13 @@ export function removeMessage(chatId, id) {
 
 export function applyState(s) {
   if (!state.me) return;
-  if (s.user === state.me.id) { myStates.set(s.chat, s); return; }
+  if (s.user === state.me.id) {
+    const before = (myStates.get(s.chat) || {}).wallpaper || "";
+    myStates.set(s.chat, s);
+    // фон поменяли на другом устройстве
+    if ((s.wallpaper || "") !== before) emit("wallpaper:" + s.chat);
+    return;
+  }
   const read = parseTime(s.readAt);
   if (!read) return;
   peerRead.set(s.chat, read);
