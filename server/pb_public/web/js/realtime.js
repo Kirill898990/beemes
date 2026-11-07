@@ -15,7 +15,10 @@ export async function resubscribe() {
   if (t.join() === lastTopics) return;
   lastTopics = t.join();
   try {
-    await api("POST", "api/realtime", { body: { clientId, subscriptions: t } });
+    // Своя подписка сервера beemes: обычная (api/realtime) отказывает, если адрес сменился (мобильный интернет, HTTP/3).
+    await api("POST", "api/bm/realtime", { body: { clientId, subscriptions: t } })
+      // 404 — старый сервер без этой подписки
+      .catch((e) => (e.status === 404 ? api("POST", "api/realtime", { body: { clientId, subscriptions: t } }) : Promise.reject(e)));
     subscribeFails = 0;
   } catch (_) {
     // Без подписки соединение открыто, но события не идут — повторяем, а после трёх неудач подключаемся заново.

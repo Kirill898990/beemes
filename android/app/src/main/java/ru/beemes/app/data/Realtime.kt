@@ -89,11 +89,19 @@ class Realtime(private val repo: Repository, private val context: android.conten
         val key = id + "|" + t.joinToString(",")
         if (key == lastTopics) return
         lastTopics = key
+        val body = buildJsonObject {
+            put("clientId", id)
+            put("subscriptions", JsonArray(t.map { JsonPrimitive(it) }))
+        }
         runCatching {
-            repo.api.sendRaw("POST", "api/realtime", buildJsonObject {
-                put("clientId", id)
-                put("subscriptions", JsonArray(t.map { JsonPrimitive(it) }))
-            })
+            // Своя подписка сервера beemes: обычная (api/realtime) отказывает, если адрес сменился
+            // (мобильный интернет, Wi-Fi ↔ LTE) — соединение открыто, а событий нет.
+            try {
+                repo.api.sendRaw("POST", "api/bm/realtime", body)
+            } catch (e: ApiException) {
+                // старый сервер без этой подписки
+                if (e.status == 404) repo.api.sendRaw("POST", "api/realtime", body) else throw e
+            }
         }.onSuccess { subscribeFails = 0 }.onFailure {
             // Без подписки соединение открыто, но события не идут — повторяем, а не ждём следующего обновления чатов.
             lastTopics = ""
