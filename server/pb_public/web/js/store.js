@@ -217,6 +217,7 @@ export async function unlock(password) {
 
 export async function logout() {
   await presence("offline");
+  await disablePush().catch(() => {});
   setToken("");
   ls.del("bm_token");
   ls.del("bm_me");
@@ -291,6 +292,45 @@ export async function deleteAccount() {
 
 /** Пробное уведомление на мои телефоны → отчёт сервера. */
 export const pushTest = () => post("api/bm/push-test");
+
+// ---------- Уведомления, когда beemes закрыт (Web Push: браузер и iPhone) ----------
+
+/** iPhone или iPad (там любой браузер — Safari внутри). */
+export const isIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent || "") || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+/** Открыт с экрана «Домой» как приложение. */
+export const standalone = () => (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+/** Браузер умеет уведомления при закрытой странице (в приложении для Windows они приходят и так). */
+export const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && !window.beemesDesktop;
+
+const keyBytes = (b64u) => C.unb64(b64u.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((b64u.length + 3) % 4));
+
+/** Подписать этот браузер на уведомления (уведомления уже разрешены). Повторный вызов просто обновляет запись. */
+export async function enablePush() {
+  if (!pushSupported() || Notification.permission !== "granted" || !state.me) return false;
+  const reg = await navigator.serviceWorker.register("sw.js");
+  await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    const { key } = await get("api/bm/webpush-key");
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
+  }
+  await idbDo("readwrite", (st) => st.put(sub.endpoint, "push_endpoint")).catch(() => {});
+  await post("api/collections/devices/records", { user: state.me.id, token: sub.endpoint, platform: "web", appVersion: "web", presence: deviceId() });
+  return true;
+}
+
+/** Выход: этот браузер больше не получает уведомления этого аккаунта. */
+export async function disablePush() {
+  if (!pushSupported()) return;
+  const reg = await navigator.serviceWorker.getRegistration("sw.js").catch(() => null);
+  const sub = reg && await reg.pushManager.getSubscription().catch(() => null);
+  if (!sub) return;
+  try {
+    const found = await get("api/collections/devices/records", { filter: `token = "${sub.endpoint.replace(/"/g, "")}"`, perPage: 5 });
+    for (const d of found.items || []) await del("api/collections/devices/records/" + d.id).catch(() => {});
+  } catch (_) { /* не страшно: сервер сам забудет подписку, когда служба уведомлений её отклонит */ }
+  await sub.unsubscribe().catch(() => {});
+}
 
 // ---------- «В сети» ----------
 function deviceId() {

@@ -97,6 +97,14 @@ cd android && ./gradlew :app:testDebugUnitTest
 `https://github.com/Kirill898990/beemes/releases/latest/download/BeemesSetup.exe`. Новая версия — поднять `version`
 в `desktop/package.json`. Закрытое окно уходит в трей (значок пчёлки возле часов), чтобы приходили сообщения и звонки.
 
+### Уведомления на iPhone и в браузере, когда beemes закрыт
+
+Web Push: на iPhone (iOS 16.4+) — если beemes добавлен на экран «Домой» («Поделиться» → «На экран „Домой“»),
+в Chrome, Edge и Firefox — просто после разрешения уведомлений. Настраивать ничего не нужно: ключ сервера
+(VAPID) создаётся сам в `pb_data/vapid.pem` — не удаляйте его, иначе подписки браузеров перестанут работать
+до следующего открытия beemes. Сервер шлёт пустой «толчок»; текст забирает и расшифровывает само устройство
+(`server/pb_public/web/sw.js`), так что ни Apple, ни Google его не видят.
+
 ## Благодарности
 
 - Анимированные эмодзи — [Noto Emoji Animation](https://googlefonts.github.io/noto-emoji-animation/), © Google, CC BY 4.0.

@@ -85,12 +85,23 @@ function route() {
 
 // ---------- Уведомления: один раз предложить включить ----------
 function maybeAskNotify() {
-  const asked = () => { try { return localStorage.getItem("bm_notify_asked"); } catch (_) { return "1"; } };
-  const remember = () => { try { localStorage.setItem("bm_notify_asked", "1"); } catch (_) { /* ignore */ } };
+  const asked = (k = "bm_notify_asked") => { try { return localStorage.getItem(k); } catch (_) { return "1"; } };
+  const remember = (k = "bm_notify_asked") => { try { localStorage.setItem(k, "1"); } catch (_) { /* ignore */ } };
+  // iPhone в обычном Safari уведомления не показывает — только beemes с экрана «Домой».
+  if (store.isIos() && !store.standalone() && !asked("bm_ios_hint")) {
+    const hint = h("div", { class: "notify-ask", role: "status" }, icon("bell", 20),
+      h("span", {}, "Чтобы уведомления приходили на iPhone, когда beemes закрыт: «Поделиться» → «На экран „Домой“», откройте beemes оттуда и включите уведомления."),
+      h("button", { type: "button", class: "icon-btn", "aria-label": "Понятно", onclick: () => { hint.remove(); remember("bm_ios_hint"); } }, icon("close", 18)));
+    setTimeout(() => document.body.append(hint), 1500);
+    return;
+  }
   if (!canNotify() || Notification.permission !== "default" || asked()) return;
   const bar = h("div", { class: "notify-ask", role: "status" }, icon("bell", 20),
     h("span", {}, "Включить уведомления о новых сообщениях?"),
-    h("button", { type: "button", class: "btn btn-primary btn-small", onclick: async () => { bar.remove(); remember(); await askNotify(); } }, "Включить"),
+    h("button", { type: "button", class: "btn btn-primary btn-small", onclick: async () => {
+      bar.remove(); remember();
+      if (await askNotify() === "granted") store.enablePush().catch(() => {});
+    } }, "Включить"),
     h("button", { type: "button", class: "icon-btn", "aria-label": "Не сейчас", onclick: () => { bar.remove(); remember(); } }, icon("close", 18)));
   setTimeout(() => document.body.append(bar), 1500);
 }
@@ -110,6 +121,8 @@ function onSignedIn() {
   clearInterval(ticker);
   ticker = setInterval(() => store.emit("users"), 30000);
   checkIncoming();
+  // Уведомления, когда beemes закрыт (уже разрешены — обновляем подписку этого браузера).
+  if (store.notifyOn.get()) store.enablePush().catch(() => {});
   if (["#/welcome", "#/login", "#/register", ""].includes(location.hash)) go("#/");
   else route();
 }
@@ -168,6 +181,11 @@ window.addEventListener("pageshow", (e) => { if (e.persisted) resume(); });
 window.beemesPresenceOffline = () => (store.state.me ? store.presence("offline") : Promise.resolve());
 
 window.addEventListener("hashchange", route);
+// Нажали на уведомление, а beemes уже открыт — переходим в чат.
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => {
+  const m = e.data || {};
+  if (m.type === "open") { window.focus(); go(m.chat ? "#/chat/" + m.chat : "#/"); }
+});
 
 (async () => {
   await loadEmoji();

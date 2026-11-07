@@ -33,7 +33,13 @@ export function menu(root, { go, route }) {
       }
     }
     store.notifyOn.set(notifyBtn.checked);
+    // Уведомления, когда beemes закрыт: подписать браузер или отписать.
+    (notifyBtn.checked ? store.enablePush() : store.disablePush()).catch(() => {});
   };
+  const iosHint = store.isIos() && !store.standalone()
+    ? h("div", { class: "row-item hint" }, icon("info"), h("span", {}, h("b", {}, "Уведомления на iPhone"),
+      h("small", {}, "Приходят, когда beemes добавлен на экран «Домой»: «Поделиться» → «На экран „Домой“». Откройте beemes оттуда, войдите и включите уведомления.")))
+    : null;
   const active = (r) => (route === r ? " active" : "");
   root.replaceChildren(
     h("header", { class: "side-header" }, iconButton("back", "К чатам", () => go("#/")), h("h2", { class: "side-title" }, "Настройки")),
@@ -41,7 +47,8 @@ export function menu(root, { go, route }) {
       h("a", { href: "#/settings/profile", class: "me-card" + active("profile") }, avatar(me, 60), h("span", {}, nameWithStatus(me, 22), h("small", {}, "@" + me.username)), icon("edit")),
       h("h3", {}, "Оформление"), h("div", { class: "card pad" }, themeSeg),
       h("h3", {}, "Уведомления"),
-      h("div", { class: "card" }, h("label", { class: "row-item" }, icon("bell"), h("span", {}, h("b", {}, "Уведомления о сообщениях"), h("small", {}, "Когда окно beemes не на экране")), notifyBtn),
+      h("div", { class: "card" }, h("label", { class: "row-item" }, icon("bell"), h("span", {}, h("b", {}, "Уведомления о сообщениях"), h("small", {}, store.pushSupported() ? "Даже когда beemes закрыт" : "Когда окно beemes не на экране")), notifyBtn),
+        iosHint,
         soundRow(),
         row("phone", "Проверить уведомления на телефоне", "Пришлём пробное уведомление и скажем, если что-то не так", pushTest)),
       h("h3", {}, "Безопасность"),
@@ -76,11 +83,23 @@ async function pushTest() {
   try { r = await store.pushTest(); } catch (e) { box.replaceChildren(h("p", { class: "form-error" }, e.message)); return; }
   const line = (good, text) => h("p", { class: good ? "ok-line" : "bad-line" }, good ? "✓ " : "✗ ", text);
   const out = [];
-  if (r.key === "missing") out.push(line(false, "На сервере не вставлен ключ Firebase (панель администратора → bm_settings → firebaseKey)."));
+  // Браузеры и iPhone (Web Push)
+  if (r.web) {
+    out.push(line(true, `Браузеров и iPhone с уведомлениями: ${r.web}.`));
+    if (r.webSent) out.push(line(true, `Пробное уведомление отправлено: ${r.webSent} из ${r.web} — «Уведомления работают 🐝».`));
+    (r.webErrors || []).forEach((e) => out.push(line(false, "Служба уведомлений ответила ошибкой: " + e)));
+  } else if (store.isIos() && !store.standalone()) {
+    out.push(line(false, "На iPhone уведомления приходят, только если beemes добавлен на экран «Домой»: «Поделиться» → «На экран „Домой“», затем откройте beemes оттуда и включите уведомления."));
+  } else if (store.pushSupported()) {
+    out.push(line(false, "Этот браузер ещё не подписан на уведомления — включите «Уведомления о сообщениях» выше."));
+  }
+  // Телефоны Android (Firebase)
+  if (r.key === "missing") { if (!r.web) out.push(line(false, "На сервере не вставлен ключ Firebase (панель администратора → bm_settings → firebaseKey).")); }
   else if (r.key === "invalid") out.push(line(false, "Ключ Firebase на сервере вставлен не полностью — скопируйте файл ключа целиком."));
   else out.push(line(true, `Ключ Firebase на месте (проект ${r.project}).`));
   if (r.key === "ok") {
-    if (!r.devices) out.push(line(false, "Ни одного телефона: установите приложение beemes (версия с уведомлениями), войдите и разрешите уведомления — телефон зарегистрируется сам."));
+    if (!r.devices && !r.web) out.push(line(false, "Ни одного телефона: установите приложение beemes (версия с уведомлениями), войдите и разрешите уведомления — телефон зарегистрируется сам."));
+    else if (!r.devices) out.push(line(true, "Телефонов Android с приложением beemes нет — только браузеры."));
     else out.push(line(true, `${r.devices} ${plural(r.devices, "телефон зарегистрирован", "телефона зарегистрированы", "телефонов зарегистрировано")}.`));
   }
   if (r.devices && r.key === "ok") out.push(line(r.login, r.login ? "Google принял ключ." : "Google не принял ключ."));

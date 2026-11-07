@@ -67,6 +67,28 @@ routerAdd("POST", "/api/bm/push-test", (e) => {
   return e.json(200, report)
 }, $apis.requireAuth("users"))
 
+// ---------- Уведомления в браузер и на iPhone (Web Push) ----------
+
+// Открытый ключ сервера — браузер подписывается на уведомления с ним.
+routerAdd("GET", "/api/bm/webpush-key", (e) => {
+  const { publicKey } = require(`${__hooks}/webpush_lib.js`)
+  return e.json(200, { key: publicKey(e.app) })
+})
+
+// Устройство проснулось от уведомления и забирает, что показать. Пропуск — сам адрес подписки:
+// его знают только этот браузер, служба уведомлений и сервер (как и данные уведомления на Android).
+// Текст сообщений зашифрован — расшифрует только само устройство.
+routerAdd("POST", "/api/bm/push-inbox", (e) => {
+  const { takeQueue } = require(`${__hooks}/webpush_lib.js`)
+  const endpoint = String((e.requestInfo().body || {}).endpoint || "")
+  let device = null
+  if (endpoint) {
+    try { device = e.app.findFirstRecordByFilter("devices", "token = {:t} && platform = 'web'", { t: endpoint }) } catch (_) {}
+  }
+  if (!device) return e.json(404, { items: [] })
+  return e.json(200, { items: takeQueue(e.app, device.id) })
+})
+
 // Старые версии приложения раз в минуту отмечаются здесь — считаем их «в сети» ещё 90 секунд.
 routerAdd("POST", "/api/bm/online", (e) => {
   const { presenceUpdate } = require(`${__hooks}/lib.js`)
@@ -222,8 +244,13 @@ onRecordCreateRequest((e) => {
 }, "blocks")
 
 // Один и тот же телефон мог раньше принадлежать другому аккаунту — переписываем на нового владельца.
+// Браузер (Web Push): адрес подписки — только служба уведомлений браузера.
 onRecordCreateRequest((e) => {
   if (e.hasSuperuserAuth()) return e.next()
+  if (e.record.getString("platform") === "web") {
+    const { allowedEndpoint } = require(`${__hooks}/webpush_lib.js`)
+    if (!allowedEndpoint(e.record.getString("token"))) throw new BadRequestError("Неизвестная служба уведомлений")
+  }
   try {
     const old = e.app.findFirstRecordByFilter("devices", "token = {:t}", { t: e.record.getString("token") })
     e.app.delete(old)

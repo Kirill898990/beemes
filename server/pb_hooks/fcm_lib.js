@@ -76,7 +76,25 @@ function accessToken(app, key, tokenUrl) {
  */
 function pushToUser(app, userId, data, urgent, ttl, report) {
   const r = report || {}
-  r.key = "missing"; r.devices = 0; r.login = false; r.sent = 0; r.errors = []
+  r.key = "missing"; r.devices = 0; r.login = false; r.sent = 0; r.errors = []; r.web = 0; r.webSent = 0
+  const phones = []
+  const browsers = []
+  app.findRecordsByFilter("devices", "user = {:u}", "-updated", 30, 0, { u: userId })
+    .forEach((d) => (d.getString("platform") === "web" ? browsers : phones).push(d))
+  // Браузеры и iPhone (Web Push) — им Firebase не нужен.
+  if (browsers.length) {
+    const { sendWebPush } = require(`${__hooks}/webpush_lib.js`)
+    r.web = browsers.length
+    try { r.webSent = sendWebPush(app, userId, browsers.slice(0, 10), data, urgent, ttl, r) } catch (err) {
+      app.logger().warn("Web Push: ошибка", "error", String(err))
+      r.webErrors = (r.webErrors || []).concat("server: " + String(err).slice(0, 160))
+    }
+  }
+  return r.webSent + pushToPhones(app, phones.slice(0, 10), data, urgent, ttl, r)
+}
+
+/** Телефоны Android — через Firebase. */
+function pushToPhones(app, devices, data, urgent, ttl, r) {
   const s = settings(app)
   if (!s) return 0
   let key = null
@@ -85,7 +103,6 @@ function pushToUser(app, userId, data, urgent, ttl, report) {
   if (!key.private_key || !key.client_email || !key.project_id) { r.key = "invalid"; return 0 }
   r.key = "ok"
   r.project = key.project_id
-  const devices = app.findRecordsByFilter("devices", "user = {:u}", "-updated", 10, 0, { u: userId })
   r.devices = devices.length
   if (!devices.length) return 0
   const tokenUrl = s.getString("tokenUrl") || key.token_uri || "https://oauth2.googleapis.com/token"

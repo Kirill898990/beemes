@@ -109,6 +109,12 @@ export async function askNotify() {
 
 function notify(title, body, tag, chatId, user, sticky = false) {
   if (!canNotify() || Notification.permission !== "granted" || !store.notifyOn.get()) return;
+  // На iPhone (с экрана «Домой») уведомление может показать только помощник в фоне — через него же
+  // нажатие откроет нужный чат.
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.ready.then((reg) => reg.showNotification(title, { body, tag, icon: "../img/icon-192.png", requireInteraction: sticky, data: { chat: chatId || "" } })).catch(() => {});
+    return;
+  }
   try {
     const n = new Notification(title, { body, tag, icon: avatarUrl(user) || "../img/logo.svg", requireInteraction: sticky, silent: false });
     n.onclick = () => { showWindow(); if (chatId) location.hash = `#/chat/${chatId}`; n.close(); };
