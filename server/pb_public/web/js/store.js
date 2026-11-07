@@ -472,6 +472,25 @@ export function applyUser(u) {
 /** id собеседников — за их «в сети» следим в реальном времени. */
 export const peerIds = () => [...new Set(state.chats.map((i) => i.peer.id))].slice(0, 300);
 
+/**
+ * Свежий «в сети» человека с сервера. Сервер сообщает о смене статуса только в момент входа и выхода —
+ * если это случилось, пока мы за человеком ещё не следили (новый собеседник, поток событий придержали),
+ * статус устарел. Поэтому спрашиваем, когда от него пришло сообщение и когда он появился в списке
+ * (не чаще раза в 15 секунд на человека).
+ */
+const presenceAsked = new Map();
+export async function refreshPresence(id) {
+  if (!id || !state.me || id === state.me.id) return;
+  const now = Date.now();
+  if (now - (presenceAsked.get(id) || 0) < 15000) return;
+  presenceAsked.set(id, now);
+  try {
+    applyUser(await user(id, true));
+    emit("users");
+    emit("chats");
+  } catch (_) { /* в следующий раз */ }
+}
+
 
 // ---------- Чаты ----------
 
@@ -1052,6 +1071,8 @@ export async function applyRecord(r) {
   setMessages(r.chat, sortMsgs([...list, msg]));
   if (!c || !chatItem(r.chat)) refreshChats().catch(() => {});
   else onNewMessage(msg);
+  // написал — значит, сейчас в сети: берём его свежий статус
+  refreshPresence(r.sender);
   return msg;
 }
 

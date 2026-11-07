@@ -959,7 +959,25 @@ class Repository(private val context: Context) {
 
     // ---------- Сообщения в реальном времени ----------
 
+    private val presenceAsked = ConcurrentHashMap<String, Long>()
+
+    /**
+     * Свежий «в сети» человека с сервера. Сервер сообщает о смене статуса только в момент входа и выхода —
+     * если это случилось, пока мы за человеком ещё не следили (новый собеседник, поток событий придержали),
+     * статус устарел. Спрашиваем, когда от него пришло сообщение или он появился в списке (раз в 15 с).
+     */
+    fun refreshPresence(id: String) {
+        val me = _me.value?.id ?: return
+        if (id.isBlank() || id == me) return
+        val now = System.currentTimeMillis()
+        if (now - (presenceAsked[id] ?: 0L) < 15_000) return
+        presenceAsked[id] = now
+        scope.launch { runCatching { applyUser(user(id, fresh = true)) } }
+    }
+
     internal fun applyRecord(r: MessageRecord) {
+        // написал — значит, сейчас в сети: берём его свежий статус
+        if (r.sender != _me.value?.id) refreshPresence(r.sender)
         val chat = chatCache[r.chat]
         if (chat != null && chat.isGroup && groupKey(chat, r.epoch) == null) {
             // ключа этой эпохи ещё нет — подгружаем и показываем сообщение уже расшифрованным

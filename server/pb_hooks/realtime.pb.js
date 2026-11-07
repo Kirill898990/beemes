@@ -26,3 +26,17 @@ routerAdd("POST", "/api/bm/realtime", (e) => {
   if (topics.length) client.subscribe(...topics)
   return e.noContent(204)
 }, $apis.requireAuth("users"))
+
+// Проверка, что поток событий живой: приложение раз в 25 секунд просит прислать отметку в своё соединение.
+// Не пришла — поток «придерживает» кто-то по дороге (антивирус с проверкой HTTPS, прокси) или он оборвался:
+// приложение переподключается, а если не помогает — опрашивает сервер, пока поток не оживёт.
+routerAdd("POST", "/api/bm/realtime/ping", (e) => {
+  const b = e.requestInfo().body || {}
+  let client = null
+  try { client = $app.subscriptionsBroker().clientById(String(b.clientId || "")) } catch (_) {}
+  if (!client) throw new BadRequestError("Соединение устарело — подключаюсь заново")
+  const a = client.get("auth")
+  if (!a || a.id !== e.auth.id) throw new ForbiddenError("Чужое соединение")
+  client.send(new SubscriptionMessage({ name: "bm_ping", data: JSON.stringify({ n: Number(b.n) || 0 }) }))
+  return e.noContent(204)
+}, $apis.requireAuth("users"))
