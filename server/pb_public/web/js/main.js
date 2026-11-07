@@ -7,6 +7,7 @@ import { chatList, search } from "./views/chats.js";
 import { chatView } from "./views/chat.js";
 import { peerProfile, safety } from "./views/profile.js";
 import * as settings from "./views/settings.js";
+import { newGroup, groupInfo, joinView, channelLink } from "./views/groups.js";
 import { checkIncoming, askNotify, canNotify } from "./calls.js";
 
 const app = document.getElementById("app");
@@ -47,8 +48,10 @@ function emptyPane(root) {
 }
 
 function route() {
-  const [a = "", b = ""] = location.hash.replace(/^#\/?/, "").split("/");
+  const [a = "", b = "", c3 = ""] = location.hash.replace(/^#\/?/, "").split("/");
   if (!store.state.me) {
+    // Приглашение открыли, не войдя, — после входа вернёмся к нему.
+    if (a === "join" || a === "c") { try { sessionStorage.setItem("bm_after_login", location.hash); } catch (_) { /* ignore */ } }
     if (layout) { layout.sideOff && layout.sideOff(); layout.paneOff && layout.paneOff(); layout = null; }
     if (a === "login") auth.login(app, go, onSignedIn);
     else if (a === "register") auth.register(app, go, onSignedIn);
@@ -59,20 +62,25 @@ function route() {
   const L = ensureLayout();
   currentChat = a === "chat" ? b : null;
 
-  const sideKey = a === "search" ? "search" : a === "settings" ? "settings:" + b : "chats";
+  const sideKey = a === "search" ? "search" : a === "settings" ? "settings:" + b : a === "new" ? "new:" + b : "chats";
   if (sideKey !== L.sideKey) {
     if (L.sideOff) L.sideOff();
     L.sideOff = sideKey === "search" ? search(L.side, { go })
       : sideKey.startsWith("settings") ? settings.menu(L.side, { go, route: b })
-        : chatList(L.side, { go, activeChat: () => currentChat });
+        : sideKey.startsWith("new:") ? newGroup(L.side, { go, type: b })
+          : chatList(L.side, { go, activeChat: () => currentChat });
     L.sideKey = sideKey;
   } else if (sideKey === "chats") store.emit("chats");
 
-  const paneKey = a === "chat" && b ? "chat:" + b : a === "user" && b ? "user:" + b : a === "safety" && b ? "safety:" + b : a === "settings" && b ? "settings:" + b : "empty";
+  const paneKey = a === "chat" && b ? "chat:" + b : a === "user" && b ? "user:" + b : a === "safety" && b ? "safety:" + b : a === "settings" && b ? "settings:" + b
+    : a === "group" && b ? "group:" + b : a === "join" && b ? "join:" + b + ":" + c3 : a === "c" && b ? "c:" + b : "empty";
   if (paneKey !== L.paneKey) {
     if (L.paneOff) L.paneOff();
     const [kind, id] = paneKey.split(":");
     L.paneOff = kind === "chat" ? chatView(L.pane, { chatId: id, go })
+      : kind === "group" ? groupInfo(L.pane, { chatId: id, go })
+      : kind === "join" ? joinView(L.pane, { code: id, key: c3, go })
+      : kind === "c" ? channelLink(L.pane, { handle: id, go })
       : kind === "user" ? peerProfile(L.pane, { userId: id, go })
         : kind === "safety" ? safety(L.pane, { chatId: id, go })
           : kind === "settings" ? ({ profile: settings.myProfile, password: settings.password, blocked: settings.blockedList, about: settings.about }[id] || emptyPane)(L.pane, { go })
@@ -123,7 +131,10 @@ function onSignedIn() {
   checkIncoming();
   // Уведомления, когда beemes закрыт (уже разрешены — обновляем подписку этого браузера).
   if (store.notifyOn.get()) store.enablePush().catch(() => {});
-  if (["#/welcome", "#/login", "#/register", ""].includes(location.hash)) go("#/");
+  let after = "";
+  try { after = sessionStorage.getItem("bm_after_login") || ""; sessionStorage.removeItem("bm_after_login"); } catch (_) { /* ignore */ }
+  if (after) go(after);
+  else if (["#/welcome", "#/login", "#/register", ""].includes(location.hash)) go("#/");
   else route();
 }
 

@@ -408,3 +408,25 @@ textarea.input { resize: vertical; min-height: 70px; }
 .gradient-editor input[type="color"] { width: 44px; height: 36px; border: 2px solid var(--line); border-radius: 10px; padding: 2px; background: var(--surface); cursor: pointer; }
 .gradient-editor .swatch { flex: 1; min-width: 120px; height: 36px; border-radius: 12px; background: linear-gradient(135deg, var(--a1), var(--a2)); color: var(--on); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
 .pattern-preview { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(135deg, var(--a1), var(--a2)); font-size: 24px; }
+
+/* ---------- Группы и каналы ---------- */
+.sender-name { display: block; border: none; background: none; padding: 0; margin: 0 0 2px; font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer; text-align: left; }
+.composer.readonly { justify-content: center; }
+.wide-btn { min-width: 240px; }
+.hex-avatar .icon { color: var(--on); }
+.list-title { margin: 14px 18px 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--primary); }
+.invite-box { display: grid; gap: 10px; }
+.member-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: 14px; }
+.member-row .grow { flex: 1; min-width: 0; }
+.member-row small { color: var(--muted); display: block; }
+.role-chip { font-size: 12px; font-weight: 700; color: var(--primary); background: var(--primary-soft); padding: 2px 9px; border-radius: 999px; }
+.pick-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; cursor: pointer; border-radius: 14px; }
+.pick-row:hover { background: var(--chip); }
+.pick-row input { width: 20px; height: 20px; accent-color: var(--primary); }
+.seg-choice { display: grid; gap: 8px; }
+.seg-choice label { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 16px; background: var(--c1); cursor: pointer; }
+.seg-choice input { margin-top: 3px; accent-color: var(--primary); }
+.join-card { max-width: 420px; margin: 60px auto; text-align: center; display: grid; justify-items: center; gap: 10px; padding: 28px; background: var(--surface); border-radius: 28px; box-shadow: var(--shadow); }
+[hidden] { display: none !important; }
+.link-like { border: none; background: none; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; display: grid; }
+.link-like:hover .name { text-decoration: underline; }

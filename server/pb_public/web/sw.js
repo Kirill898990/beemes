@@ -50,9 +50,28 @@ async function chatKey(priv, theirPublic, chatId) {
   return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
 }
 
+/** Ключ группы из уведомления: открытый (публичный канал) или свой экземпляр, зашифрованный лично для нас. */
+async function groupKey(d, keys) {
+  if (d.openKey) return crypto.subtle.importKey("raw", unb64(d.openKey), "AES-GCM", false, ["decrypt"]);
+  if (!d.keyBody || !d.keyFromPub) return null;
+  const me = await idbGet("user_id");
+  for (const priv of keys) {
+    try {
+      const pub = await crypto.subtle.importKey("raw", unb64(d.keyFromPub), { name: "X25519" }, false, []);
+      const shared = await crypto.subtle.deriveBits({ name: "X25519", public: pub }, priv, 256);
+      const hk = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveBits"]);
+      const w = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: enc.encode(`group|${d.chat}|${d.epoch}`), info: enc.encode("beemes-group-key-v1") }, hk, 256);
+      const wk = await crypto.subtle.importKey("raw", w, "AES-GCM", false, ["decrypt"]);
+      const raw = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(d.keyNonce), additionalData: enc.encode(`${d.chat}|${d.epoch}|${me}`) }, wk, unb64(d.keyBody));
+      return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+    } catch (_) { /* следующий способ */ }
+  }
+  return null;
+}
+
 /** Расшифровать сообщение из уведомления. → содержимое ({t: "текст"} и т. п.) или null. */
 async function decrypt(d) {
-  if (!d.body || !d.nonce || !d.senderKey) return null;
+  if (!d.body || !d.nonce || (!d.senderKey && !d.chatType)) return null;
   const keys = [];
   const k = await idbGet("private");
   if (k) keys.push(k);
@@ -63,6 +82,14 @@ async function decrypt(d) {
       pk.set(PKCS8_PREFIX); pk.set(new Uint8Array(raw), PKCS8_PREFIX.length);
       keys.push(await crypto.subtle.importKey("pkcs8", pk, { name: "X25519" }, false, ["deriveBits"]));
     } catch (_) { /* ниже — без текста */ }
+  }
+  if (d.chatType) {
+    try {
+      const key = await groupKey(d, keys);
+      if (!key) return null;
+      const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(d.nonce), additionalData: enc.encode(`${d.chat}|${d.sender}`) }, key, unb64(d.body));
+      return JSON.parse(dec.decode(plain));
+    } catch (_) { return null; }
   }
   for (const priv of keys) {
     try {
@@ -87,7 +114,11 @@ async function toNotification(d) {
   const icon = ROOT + "img/icon-192.png";
   if (d.type === "msg") {
     const content = await decrypt(d);
-    return { title: d.senderName || "beemes", options: { body: messageText(d.kind, content), tag: "chat-" + d.chat, icon, silent: d.silent === "1", data: { chat: d.chat } } };
+    const text = messageText(d.kind, content);
+    // В группе — «Алиса: текст» под названием группы, в канале — просто текст.
+    const title = d.chatType ? d.chatTitle || "beemes" : d.senderName || "beemes";
+    const body = d.chatType === "group" ? `${d.senderName || ""}: ${text}` : text;
+    return { title, options: { body, tag: "chat-" + d.chat, icon, silent: d.silent === "1", data: { chat: d.chat } } };
   }
   if (d.type === "call") {
     return { title: d.name || "beemes", options: { body: d.video ? "📹 Видеозвонок — нажмите, чтобы ответить" : "📞 Звонит — нажмите, чтобы ответить", tag: "call-" + d.call, icon, requireInteraction: true, data: { chat: d.chat, call: d.call } } };

@@ -11,7 +11,7 @@ onRecordCreateRequest((e) => {
   const username = String(e.record.getString("username")).trim().toLowerCase().replace(/^@/, "")
   e.record.set("username", username)
   e.record.set("name", String(e.record.getString("name")).trim())
-  if (RESERVED.indexOf(username) >= 0) {
+  if (RESERVED.indexOf(username) >= 0 || e.app.countRecords("chats", $dbx.hashExp({ handle: username })) > 0) {
     throw new BadRequestError("Это имя занято", { username: new ValidationError("validation_not_unique", "Это имя занято") })
   }
   // Открытый ключ X25519 — ровно 32 байта (44 символа base64).
@@ -54,7 +54,8 @@ routerAdd("GET", "/api/bm/username/{name}", (e) => {
   const { RESERVED } = require(`${__hooks}/lib.js`)
   const name = String(e.request.pathValue("name") || "").toLowerCase().replace(/^@/, "")
   if (!/^[a-z0-9_]{3,32}$/.test(name)) return e.json(200, { free: false, reason: "format" })
-  const taken = RESERVED.indexOf(name) >= 0 || e.app.countRecords("users", $dbx.hashExp({ username: name })) > 0
+  const taken = RESERVED.indexOf(name) >= 0 || e.app.countRecords("users", $dbx.hashExp({ username: name })) > 0 ||
+    e.app.countRecords("chats", $dbx.hashExp({ handle: name })) > 0
   return e.json(200, { free: !taken })
 })
 
@@ -188,8 +189,17 @@ onRecordCreateRequest((e) => {
   if (e.hasSuperuserAuth()) return e.next()
   const { otherMember, hasBlocked } = require(`${__hooks}/lib.js`)
   const chat = e.app.findRecordById("chats", e.record.getString("chat"))
-  const other = otherMember(chat, e.auth.id)
-  if (hasBlocked(e.app, other, e.auth.id)) throw new ForbiddenError("Этот человек ограничил, кто может ему писать")
+  const type = chat.getString("type")
+  if (!type) {
+    const other = otherMember(chat, e.auth.id)
+    if (hasBlocked(e.app, other, e.auth.id)) throw new ForbiddenError("Этот человек ограничил, кто может ему писать")
+    e.record.set("epoch", 0)
+  } else {
+    const G = require(`${__hooks}/groups_lib.js`)
+    if (type === "channel" && !G.isAdmin(chat, e.auth.id)) throw new ForbiddenError("В канале пишут только админы")
+    // Сообщение зашифровано ключом текущей эпохи (в публичном канале — открытым ключом, эпоха 0).
+    if (e.record.getInt("epoch") !== chat.getInt("keyEpoch")) throw new BadRequestError("Ключ группы обновился — откройте чат заново")
+  }
   const kind = e.record.getString("kind")
   if (!e.record.getString("body") || !/^[A-Za-z0-9+/=]{16,32}$/.test(e.record.getString("nonce"))) {
     throw new BadRequestError("Сообщение должно быть зашифровано")
@@ -218,20 +228,44 @@ onRecordAfterCreateSuccess((e) => {
   // Новое сообщение возвращает скрытый чат в список у обоих.
   e.app.db().newQuery("UPDATE chat_state SET hidden = 0 WHERE chat = {:c}").bind({ c: chat.id }).execute()
   const sender = e.app.findRecordById("users", msg.getString("sender"))
-  const to = otherMember(chat, sender.id)
-  let muted = false
-  try { muted = e.app.findFirstRecordByFilter("chat_state", "chat = {:c} && user = {:u}", { c: chat.id, u: to }).getBool("muted") } catch (_) {}
   const body = msg.getString("body")
-  try {
-    pushToUser(e.app, to, {
-      type: "msg", chat: chat.id, id: msg.id, kind: msg.getString("kind"),
-      sender: sender.id, senderName: displayName(sender), senderKey: sender.getString("publicKey"),
-      // Текст зашифрован — расшифрует только телефон получателя. Длинные сообщения телефон скачает сам.
-      body: body.length <= 3000 ? body : "", nonce: body.length <= 3000 ? msg.getString("nonce") : "",
-      silent: muted ? "1" : "",
-    }, !muted, 86400)
-  } catch (err) {
-    e.app.logger().warn("push failed", "error", String(err))
+  const type = chat.getString("type")
+  // Личный чат — собеседнику; группа и канал — всем участникам, кроме автора
+  // (больших каналов — без уведомлений: сообщения придут, когда откроют beemes).
+  const recipients = type ? chat.getStringSlice("members").filter((m) => m !== sender.id) : [otherMember(chat, sender.id)]
+  if (recipients.length <= 300) {
+    const mutedSet = {}
+    e.app.findRecordsByFilter("chat_state", "chat = {:c} && muted = true", "", 0, 0, { c: chat.id }).forEach((st) => { mutedSet[st.getString("user")] = true })
+    const epoch = msg.getInt("epoch")
+    const keys = {}
+    if (type && epoch > 0) {
+      e.app.findRecordsByFilter("chat_keys", "chat = {:c} && epoch = {:e}", "", 0, 0, { c: chat.id, e: epoch }).forEach((k) => { keys[k.getString("user")] = k })
+    }
+    const fromKeys = {}
+    recipients.forEach((to) => {
+      const muted = !!mutedSet[to]
+      const data = {
+        type: "msg", chat: chat.id, id: msg.id, kind: msg.getString("kind"),
+        sender: sender.id, senderName: displayName(sender), senderKey: sender.getString("publicKey"),
+        // Текст зашифрован — расшифрует только телефон получателя. Длинные сообщения телефон скачает сам.
+        body: body.length <= 3000 ? body : "", nonce: body.length <= 3000 ? msg.getString("nonce") : "",
+        silent: muted ? "1" : "",
+      }
+      if (type) {
+        data.chatType = type
+        data.chatTitle = chat.getString("title")
+        data.epoch = String(epoch)
+        if (epoch === 0) data.openKey = chat.getString("openKey")
+        const k = keys[to]
+        if (k) {
+          // Ключ группы, зашифрованный лично для получателя (сервер его не знает).
+          const from = k.getString("from")
+          if (!(from in fromKeys)) { try { fromKeys[from] = e.app.findRecordById("users", from).getString("publicKey") } catch (_) { fromKeys[from] = "" } }
+          data.keyBody = k.getString("body"); data.keyNonce = k.getString("nonce"); data.keyFrom = from; data.keyFromPub = fromKeys[from]
+        }
+      }
+      try { pushToUser(e.app, to, data, !muted, 86400) } catch (err) { e.app.logger().warn("push failed", "error", String(err)) }
+    })
   }
   e.next()
 }, "messages")

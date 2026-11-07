@@ -232,6 +232,7 @@ export async function logout() {
   photoUrls.clear();
   wallpaperUrls.forEach((u) => URL.revokeObjectURL(u));
   wallpaperUrls.clear();
+  groupRaw.clear(); groupKeys.clear(); keysLoaded = new Map();
   emit("me", null);
   flushDesktop();
 }
@@ -317,6 +318,7 @@ export async function enablePush() {
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
   }
   await idbDo("readwrite", (st) => st.put(sub.endpoint, "push_endpoint")).catch(() => {});
+  await idbDo("readwrite", (st) => st.put(state.me.id, "user_id")).catch(() => {});
   await post("api/collections/devices/records", { user: state.me.id, token: sub.endpoint, platform: "web", appVersion: "web", presence: deviceId() });
   return true;
 }
@@ -371,6 +373,63 @@ export const peerIds = () => [...new Set(state.chats.map((i) => i.peer.id))].sli
 
 export const peerOf = (chat) => (chat.members || []).find((m) => m !== (state.me && state.me.id)) || "";
 
+// ---------- Ключи групп и каналов ----------
+export const isGroup = (c) => !!(c && c.type);
+const groupRaw = new Map(); // "чат:эпоха" → 32 байта ключа
+const groupKeys = new Map(); // "чат:эпоха" → ключ AES
+let keysLoaded = new Map(); // чат → Promise загрузки своих экземпляров ключей
+const keysTried = new Map();
+
+/** Загрузить свои экземпляры ключей группы с сервера и расшифровать. */
+function loadGroupKeys(chatId, force = false) {
+  if (!force && keysLoaded.has(chatId)) return keysLoaded.get(chatId);
+  const p = (async () => {
+    const rows = (await get("api/collections/chat_keys/records", { filter: `chat = '${chatId}'`, perPage: 200 })).items;
+    for (const r of rows) {
+      const id = `${chatId}:${r.epoch}`;
+      if (groupRaw.has(id)) continue;
+      try {
+        const from = r.from === state.me.id ? state.me : await user(r.from);
+        const raw = await C.unwrapGroupKey(state.privateKey, C.unb64(from.publicKey), chatId, r.epoch, state.me.id, r.body, r.nonce);
+        groupRaw.set(id, raw);
+      } catch (_) { /* испорченный экземпляр — пропускаем */ }
+    }
+  })().catch(() => { keysLoaded.delete(chatId); });
+  keysLoaded.set(chatId, p);
+  return p;
+}
+
+/** Ключ сообщений группы для эпохи (публичный канал — открытый ключ, эпоха 0). null — ключа у нас нет. */
+async function groupKeyFor(c, epoch) {
+  const id = `${c.id}:${epoch}`;
+  if (groupKeys.has(id)) return groupKeys.get(id);
+  let raw = null;
+  if (c.isPublic && c.openKey) raw = C.unb64(c.openKey);
+  else {
+    if (!groupRaw.has(id)) {
+      // ключа этой эпохи нет — перечитаем свои экземпляры (не чаще раза в 10 секунд)
+      const stale = keysLoaded.has(c.id) && Date.now() - (keysTried.get(c.id) || 0) > 10000;
+      if (stale) keysTried.set(c.id, Date.now());
+      await loadGroupKeys(c.id, stale);
+    }
+    raw = groupRaw.get(id) || null;
+  }
+  if (!raw) return null;
+  if (!c.isPublic) groupRaw.set(id, raw);
+  const k = C.groupKey(raw);
+  groupKeys.set(id, k);
+  return k;
+}
+
+/** Отдать ключ эпохи участникам (их открытые ключи — в users). */
+async function shareGroupKey(chatId, epoch, raw, users) {
+  for (const u of users) {
+    if (!u || !u.publicKey) continue;
+    const w = await C.wrapGroupKey(state.privateKey, C.unb64(u.publicKey), chatId, epoch, u.id, raw);
+    await post("api/collections/chat_keys/records", { chat: chatId, user: u.id, epoch, from: state.me.id, body: w.body, nonce: w.nonce }).catch(() => {});
+  }
+}
+
 async function keyFor(chat, peer) {
   if (keyCache.has(chat.id)) return keyCache.get(chat.id);
   if (!state.privateKey || !peer || !peer.publicKey) return null;
@@ -382,12 +441,16 @@ async function keyFor(chat, peer) {
 export async function decrypt(r, chat = chatCache.get(r.chat)) {
   let content = null;
   try {
-    const peer = chat && (state.users.get(peerOf(chat)) || (await user(peerOf(chat))));
-    const key = await keyFor(chat, peer);
+    let key;
+    if (isGroup(chat)) key = await groupKeyFor(chat, r.epoch || 0);
+    else {
+      const peer = chat && (state.users.get(peerOf(chat)) || (await user(peerOf(chat))));
+      key = await keyFor(chat, peer);
+    }
     content = await C.open(key, r.body, r.nonce, C.messageAad(r.chat, r.sender));
   } catch (_) { /* не расшифровать — покажем «не удалось» */ }
   return {
-    id: r.id, chatId: r.chat, senderId: r.sender, kind: r.kind, content,
+    id: r.id, chatId: r.chat, senderId: r.sender, kind: r.kind, content, epoch: r.epoch || 0,
     created: parseTime(r.created) || new Date(), edited: !!r.editedAt, file: r.file || "", replyTo: r.replyTo || "",
     status: statusFor(r.chat, r.sender, parseTime(r.created)),
   };
@@ -400,6 +463,14 @@ function statusFor(chatId, sender, created) {
 }
 
 async function item(c, unread) {
+  if (isGroup(c)) {
+    const st = myStates.get(c.id);
+    const lastRec = c.expand && c.expand.lastMessage;
+    const local = messages.get(c.id);
+    const last = lastRec ? await decrypt(lastRec, c) : local && local.length ? local[local.length - 1] : null;
+    if (last && last.senderId !== state.me.id && !state.users.get(last.senderId)) await user(last.senderId).catch(() => null);
+    return { chat: c, peer: null, group: true, last, unread, muted: !!(st && st.muted), hidden: !!(st && st.hidden) && !last, peerReadAt: peerRead.get(c.id) || null };
+  }
   const peerId = peerOf(c);
   if (!peerId) return null;
   const peer = state.users.get(peerId) || ((c.expand && c.expand.members) || []).find((u) => u.id === peerId);
@@ -420,7 +491,11 @@ export async function refreshChats() {
   ]);
   for (const s of states) {
     if (s.user === state.me.id) myStates.set(s.chat, s);
-    else if (s.readAt) peerRead.set(s.chat, parseTime(s.readAt));
+    else if (s.readAt) {
+      const t = parseTime(s.readAt);
+      const prev = peerRead.get(s.chat);
+      if (!prev || t > prev) peerRead.set(s.chat, t);
+    }
   }
   for (const c of list.items) {
     chatCache.set(c.id, c);
@@ -438,6 +513,139 @@ export async function chat(id) {
   chatCache.set(id, c);
   return c;
 }
+
+// ---------- Группы и каналы ----------
+
+/** Создать группу или канал. Ключ создаём здесь и раздаём участникам (сервер его не видит). */
+export async function createGroup({ type, title, about = "", members = [], isPublic = false, handle = "" }) {
+  const raw = C.newGroupKey();
+  const body = { type, title, about, members, isPublic, handle };
+  if (isPublic) body.openKey = C.b64(raw);
+  const c = await post("api/bm/groups", body);
+  chatCache.set(c.id, c);
+  if (!isPublic) {
+    groupRaw.set(`${c.id}:1`, raw);
+    keysLoaded.set(c.id, Promise.resolve());
+    const people = [state.me, ...(await Promise.all(c.members.filter((m) => m !== state.me.id).map((m) => user(m).catch(() => null))))];
+    await shareGroupKey(c.id, 1, raw, people);
+  }
+  await refreshChats();
+  return c;
+}
+
+/** Ссылка-приглашение: код для сервера + ключ после «#» (на сервер не уходит). */
+export function inviteLink(c) {
+  if (c.isPublic) return `${location.origin}/web/#/c/${c.handle}`;
+  const raw = groupRaw.get(`${c.id}:${c.keyEpoch}`);
+  if (!c.inviteCode || !raw) return "";
+  return `${location.origin}/web/#/join/${c.inviteCode}/${c.keyEpoch}.${C.b64url(raw)}`;
+}
+export async function ensureGroupKey(c) { if (!c.isPublic) await groupKeyFor(c, c.keyEpoch); }
+
+export const invitePreview = (code) => get(`api/bm/invite/${encodeURIComponent(code)}`);
+
+/** Вступить по ссылке: сервер добавляет в участники, ключ из ссылки сохраняем для своих устройств. */
+export async function joinByInvite(code, epoch, key) {
+  const c = await post("api/bm/join", { code });
+  chatCache.set(c.id, c);
+  if (key && epoch) {
+    const raw = C.unb64url(key);
+    if (raw.length === 32) {
+      groupRaw.set(`${c.id}:${epoch}`, raw);
+      await shareGroupKey(c.id, Number(epoch), raw, [state.me]);
+    }
+  }
+  keysLoaded.delete(c.id);
+  await refreshChats();
+  return c;
+}
+
+/** Подписаться на публичный канал. */
+export async function joinPublic(chatId) {
+  const c = await post("api/bm/join", { chat: chatId });
+  chatCache.set(c.id, c);
+  await refreshChats();
+  return c;
+}
+
+export const channelByHandle = (handle) => get("api/bm/channels", { handle }).then((r) => r.items[0] || null);
+export const searchChannels = (q) => get("api/bm/channels", { q }).then((r) => r.items).catch(() => []);
+export const groupMembers = (id) => get(`api/bm/groups/${id}/members`);
+
+/** Свежие данные группы (после изменений). */
+export async function reloadChat(id) {
+  const c = await get(`api/collections/chats/records/${id}`, { expand: "lastMessage" });
+  chatCache.set(id, c);
+  return c;
+}
+
+export async function leaveGroup(id) {
+  await post(`api/bm/groups/${id}/leave`);
+  chatCache.delete(id);
+  messages.delete(id);
+  state.chats = state.chats.filter((i) => i.chat.id !== id);
+  emit("chats");
+}
+export async function deleteGroup(id) {
+  await post(`api/bm/groups/${id}/delete`);
+  chatCache.delete(id);
+  state.chats = state.chats.filter((i) => i.chat.id !== id);
+  emit("chats");
+}
+export const setAdmin = (id, userId, admin) => post(`api/bm/groups/${id}/admin`, { user: userId, admin });
+export const newInvite = (id) => post(`api/bm/groups/${id}/invite`).then(() => reloadChat(id));
+export async function updateGroup(id, fields) {
+  const c = await patch(`api/collections/chats/records/${id}`, fields);
+  chatCache.set(id, c);
+  await refreshChats();
+  return c;
+}
+export async function setGroupPhoto(id, blob) {
+  const form = new FormData();
+  if (blob) form.append("photo", blob, "photo.jpg"); else form.append("photo", "");
+  const c = await api("PATCH", `api/collections/chats/records/${id}`, { body: form });
+  chatCache.set(id, c);
+  await refreshChats();
+  return c;
+}
+
+/** Добавить людей: сервер записывает их в участники, а ключ им отдаём мы. */
+export async function addMembers(id, userIds) {
+  const r = await post(`api/bm/groups/${id}/add`, { users: userIds });
+  const c = await reloadChat(id);
+  if (!c.isPublic && r.added.length) {
+    await groupKeyFor(c, c.keyEpoch);
+    const raw = groupRaw.get(`${id}:${c.keyEpoch}`);
+    if (raw) await shareGroupKey(id, c.keyEpoch, raw, await Promise.all(r.added.map((u) => user(u).catch(() => null))));
+  }
+  return r.added;
+}
+
+/** Исключить: сервер меняет эпоху, мы создаём новый ключ и раздаём его оставшимся. */
+export async function removeMember(id, userId) {
+  const r = await post(`api/bm/groups/${id}/remove`, { user: userId });
+  const c = await reloadChat(id);
+  if (!c.isPublic) {
+    const raw = C.newGroupKey();
+    groupRaw.set(`${id}:${r.epoch}`, raw);
+    const { members } = await groupMembers(id);
+    await shareGroupKey(id, r.epoch, raw, members);
+  }
+  return c;
+}
+
+/** У кого нет ключа текущей эпохи (вступили, пока нас не было) — отдаём, если он есть у нас. */
+export async function healGroupKeys(c) {
+  if (!isGroup(c) || c.isPublic || !c.joined) return;
+  if (c.type === "channel" && !isAdminOf(c)) return;
+  await groupKeyFor(c, c.keyEpoch);
+  const raw = groupRaw.get(`${c.id}:${c.keyEpoch}`);
+  if (!raw) return;
+  const { members } = await groupMembers(c.id);
+  const missing = members.filter((m) => !m.hasKey);
+  if (missing.length) await shareGroupKey(c.id, c.keyEpoch, raw, missing);
+}
+export const isAdminOf = (c) => !!(c && state.me && (c.owner === state.me.id || (c.admins || []).includes(state.me.id)));
 
 /** Чат с человеком (если его нет — создаётся). */
 export async function chatWith(userId) {
@@ -538,9 +746,16 @@ const sortMsgs = (list) => list.sort((a, b) => {
 /** Загрузить последние сообщения или более ранние (before). → есть ли ещё. */
 export async function loadMessages(chatId, before = null) {
   const c = await chat(chatId);
-  await user(peerOf(c));
-  const filter = `chat = '${chatId}'` + (before ? ` && created < '${serverTime(before)}'` : "");
-  const page = await get("api/collections/messages/records", { filter, sort: "-created", perPage: 60 });
+  if (!isGroup(c)) await user(peerOf(c));
+  let page;
+  if (isGroup(c) && c.isPublic && c.joined === false) {
+    // Публичный канал до подписки: посты отдаёт отдельный запрос.
+    const r = await get(`api/bm/channels/${chatId}/posts`, before ? { before: serverTime(before) } : undefined);
+    page = { items: r.items, totalPages: r.more ? 2 : 1 };
+  } else {
+    const filter = `chat = '${chatId}'` + (before ? ` && created < '${serverTime(before)}'` : "");
+    page = await get("api/collections/messages/records", { filter, sort: "-created", perPage: 60 });
+  }
   const loaded = await Promise.all(page.items.map((r) => decrypt(r, c)));
   const current = messagesOf(chatId);
   const pending = current.filter((m) => m.status === "sending" || m.status === "failed");
@@ -553,6 +768,17 @@ export async function loadMessages(chatId, before = null) {
 
 async function seal(chatId, content) {
   const c = await chat(chatId);
+  if (isGroup(c)) {
+    if (!c.isPublic) {
+      // эпоха могла смениться (кого-то исключили) — берём свежую
+      const fresh = await get(`api/collections/chats/records/${chatId}`).catch(() => null);
+      if (fresh) { c.keyEpoch = fresh.keyEpoch; chatCache.set(chatId, { ...c, ...fresh }); }
+    }
+    const epoch = c.isPublic ? 0 : c.keyEpoch;
+    const key = await groupKeyFor(c, epoch);
+    if (!key) throw new ApiError("Ключ шифрования группы ещё не пришёл. Попросите админа открыть группу.");
+    return { ...(await C.seal(key, content, C.messageAad(chatId, state.me.id))), epoch };
+  }
   const peer = await user(peerOf(c));
   const key = await keyFor(c, peer);
   if (!key) throw new ApiError("Нет ключа шифрования собеседника");
@@ -575,6 +801,7 @@ async function send(chatId, kind, content, replyTo = "", file = null) {
   try {
     const sealed = await seal(chatId, content);
     const fields = { chat: chatId, sender: state.me.id, kind, body: sealed.body, nonce: sealed.nonce };
+    if (sealed.epoch !== undefined) fields.epoch = sealed.epoch;
     if (replyTo) fields.replyTo = replyTo;
     let saved;
     if (file) {
@@ -617,6 +844,8 @@ export async function retry(msg) {
 export const discard = (msg) => setMessages(msg.chatId, messagesOf(msg.chatId).filter((m) => m.id !== msg.id));
 
 export async function edit(msg, text) {
+  const c = await chat(msg.chatId);
+  if (isGroup(c) && (msg.epoch || 0) !== (c.isPublic ? 0 : c.keyEpoch)) throw new ApiError("Это сообщение уже не изменить: ключ группы сменился");
   const sealed = await seal(msg.chatId, { ...(msg.content || {}), t: text.trim() });
   const saved = await patch(`api/collections/messages/records/${msg.id}`, { body: sealed.body, nonce: sealed.nonce });
   await applyRecord(saved);
@@ -706,8 +935,11 @@ export function applyState(s) {
     if ((s.wallpaper || "") !== before) emit("wallpaper:" + s.chat);
     return;
   }
-  const read = parseTime(s.readAt);
+  let read = parseTime(s.readAt);
   if (!read) return;
+  // В группе «прочитано», когда прочитал хоть кто-то.
+  const prev = peerRead.get(s.chat);
+  if (prev && prev > read) read = prev;
   peerRead.set(s.chat, read);
   setMessages(s.chat, messagesOf(s.chat).map((m) => (m.senderId === state.me.id && m.status === "sent" && m.created <= read ? { ...m, status: "read" } : m)));
   state.chats = state.chats.map((i) => (i.chat.id === s.chat ? { ...i, peerReadAt: read } : i));

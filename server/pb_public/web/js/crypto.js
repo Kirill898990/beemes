@@ -101,6 +101,33 @@ export async function chatKey(privateKey, theirPublic, chatId) {
 
 export const messageAad = (chatId, senderId) => enc.encode(`${chatId}|${senderId}`);
 
+// ---------- Группы и каналы ----------
+// Ключ группы — 32 случайных байта (у каждой «эпохи» свой). Участнику он передаётся зашифрованным лично для него:
+// X25519(от кого, кому) → HKDF(соль «group|чат|эпоха») → AES-GCM. Так же делают телефон (Crypto.kt) и тесты сервера.
+const GROUP_INFO = enc.encode("beemes-group-key-v1");
+async function groupWrapKey(privateKey, theirPublic, chatId, epoch) {
+  const priv = privateKey instanceof Uint8Array ? await importPrivate(privateKey) : privateKey;
+  const pub = await subtle.importKey("raw", theirPublic, { name: "X25519" }, false, []);
+  const shared = await subtle.deriveBits({ name: "X25519", public: pub }, priv, 256);
+  const hk = await subtle.importKey("raw", shared, "HKDF", false, ["deriveBits"]);
+  const raw = new Uint8Array(await subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: enc.encode(`group|${chatId}|${epoch}`), info: GROUP_INFO }, hk, 256));
+  return aesKey(raw, ["encrypt", "decrypt"]);
+}
+const groupAad = (chatId, epoch, userId) => enc.encode(`${chatId}|${epoch}|${userId}`);
+export const newGroupKey = () => randomBytes(32);
+/** Зашифровать ключ группы для участника userId (его открытый ключ theirPublic). */
+export async function wrapGroupKey(privateKey, theirPublic, chatId, epoch, userId, raw) {
+  const nonce = randomBytes(12);
+  return { body: b64(await gcm(true, await groupWrapKey(privateKey, theirPublic, chatId, epoch), nonce, raw, groupAad(chatId, epoch, userId))), nonce: b64(nonce) };
+}
+/** Расшифровать свой экземпляр ключа группы (fromPublic — ключ того, кто его прислал). */
+export async function unwrapGroupKey(privateKey, fromPublic, chatId, epoch, userId, body, nonce) {
+  return gcm(false, await groupWrapKey(privateKey, fromPublic, chatId, epoch), unb64(nonce), unb64(body), groupAad(chatId, epoch, userId));
+}
+export const groupKey = (raw) => aesKey(raw, ["encrypt", "decrypt"]);
+export const b64url = (bytes) => b64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export const unb64url = (text) => unb64(text.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((text.length + 3) % 4));
+
 /** Зашифровать содержимое сообщения (объект → JSON). */
 export async function seal(key, content, aad) {
   const nonce = randomBytes(12);

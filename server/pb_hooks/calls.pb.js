@@ -32,6 +32,7 @@ onRecordCreateRequest((e) => {
   if (e.hasSuperuserAuth()) return e.next()
   const { iso, hasBlocked, displayName } = require(`${__hooks}/lib.js`)
   const chat = e.app.findRecordById("chats", e.record.getString("chat"))
+  if (chat.getString("type")) throw new BadRequestError("Звонки в группах и каналах пока недоступны")
   if (chat.getStringSlice("members").indexOf(e.record.getString("to")) < 0) throw new BadRequestError("Звонить можно только собеседнику по чату")
   if (e.record.getString("type") === "ring") {
     if (hasBlocked(e.app, e.record.getString("to"), e.auth.id)) throw new ForbiddenError("Этот человек ограничил, кто может ему звонить")

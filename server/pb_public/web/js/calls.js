@@ -159,6 +159,12 @@ store.on("new-message", (msg) => {
   messageSound(looking);
   if (looking) return;
   const sender = store.state.users.get(msg.senderId) || (item && item.peer);
+  if (item && item.group) {
+    // группа: «Алиса: текст» под названием; канал: просто текст поста
+    const text = item.chat.type === "group" ? `${sender ? titleOf(sender) : ""}: ${preview(msg, me.id)}` : preview(msg, me.id);
+    notify(item.chat.title || "beemes", text, "chat-" + msg.chatId, msg.chatId, null);
+    return;
+  }
   notify(titleOf(sender), preview(msg, me.id), "chat-" + msg.chatId, msg.chatId, sender);
 });
 

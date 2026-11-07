@@ -1,7 +1,7 @@
 /* Переписка: сообщения, фото, ответы, правка, живые эмодзи, звонки. */
 import {
   h, icon, iconButton, avatar, nameWithStatus, lastSeenText, isOnline, timeOfDay, dayTitle, richText, bigEmoji, animoji,
-  emojiGroups, popupMenu, modal, toast, disposeEmoji, accentOf, accentVars, titleOf, WALLPAPERS, wallpaperStyle, stickers, stickerUrl,
+  emojiGroups, popupMenu, modal, toast, disposeEmoji, accentOf, accentVars, titleOf, WALLPAPERS, wallpaperStyle, stickers, stickerUrl, groupAvatar, groupTitle, groupSubtitle,
 } from "../ui.js";
 import * as store from "../store.js";
 import { callTitle, preview } from "./chats.js";
@@ -36,22 +36,34 @@ export function chatView(root, { chatId, go }) {
   store.state.openChatId = chatId;
 
   // ---------- Шапка ----------
-  const who = h("button", { type: "button", class: "chat-who", onclick: () => peer && go(`#/user/${peer.id}`) });
+  let group = null; // группа или канал (иначе — личный чат с peer)
+  const who = h("button", { type: "button", class: "chat-who", onclick: () => (group ? go(`#/group/${group.id}`) : peer && go(`#/user/${peer.id}`)) });
+  const callVideo = iconButton("video", "Видеозвонок", () => startCall(chatId, true));
+  const callAudio = iconButton("phone", "Позвонить", () => startCall(chatId, false));
   const header = h("header", { class: "chat-header" },
     iconButton("back", "К чатам", () => go("#/"), { class: "only-narrow" }),
-    who,
-    iconButton("video", "Видеозвонок", () => startCall(chatId, true)),
-    iconButton("phone", "Позвонить", () => startCall(chatId, false)),
+    who, callVideo, callAudio,
     iconButton("more", "Ещё", (e) => {
       const r = e.currentTarget.getBoundingClientRect();
       const item = store.chatItem(chatId);
-      popupMenu(r.right - 220, r.bottom + 4, [
+      const muteItem = { icon: item && item.muted ? "bell" : "belloff", label: item && item.muted ? "Включить звук" : "Без звука", onclick: () => store.setMuted(chatId, !(item && item.muted)).catch((x) => toast(x.message)) };
+      popupMenu(r.right - 220, r.bottom + 4, group ? [
+        { icon: "info", label: group.type === "channel" ? "О канале" : "О группе", onclick: () => go(`#/group/${group.id}`) },
+        group.joined ? { icon: "palette", label: "Фон чата", onclick: wallpaperPicker } : null,
+        group.joined ? muteItem : null,
+        group.isPublic || store.isAdminOf(group) ? { icon: "link", label: "Пригласить по ссылке", onclick: () => showInvite(group) } : null,
+      ].filter(Boolean) : [
         { icon: "palette", label: "Фон чата", onclick: wallpaperPicker },
-        { icon: item && item.muted ? "bell" : "belloff", label: item && item.muted ? "Включить звук" : "Без звука", onclick: () => store.setMuted(chatId, !(item && item.muted)).catch((x) => toast(x.message)) },
+        muteItem,
         { icon: "lock", label: "Код безопасности", onclick: () => go(`#/safety/${chatId}`) },
       ]);
     }));
   const renderWho = () => {
+    if (group) {
+      disposeEmoji(who);
+      who.replaceChildren(groupAvatar(group, 42), h("span", { class: "who-text" }, groupTitle(group, 18), h("span", { class: "who-status" }, groupSubtitle(group))));
+      return;
+    }
     if (!peer) return;
     const p = store.state.users.get(peer.id) || peer;
     disposeEmoji(who);
@@ -133,8 +145,14 @@ export function chatView(root, { chatId, go }) {
         h("span", {}, h("b", {}, callTitle(m, mine)), h("small", {}, mine ? "Исходящий" : "Входящий")));
     } else body = richText(c.t, "text");
     const quote = m.replyTo ? replyQuote(m.replyTo) : null;
+    let author = null;
+    if (group && group.type === "group" && !mine) {
+      const u = store.state.users.get(m.senderId);
+      if (!u) store.user(m.senderId).then(() => { lastRendered = ""; render(); }).catch(() => {});
+      author = h("button", { type: "button", class: "sender-name", style: { color: accentOf(u || { id: m.senderId }).b }, onclick: () => go(`#/user/${m.senderId}`) }, u ? titleOf(u) : "…");
+    }
     const el = h("div", { class: "msg-row" + (mine ? " mine" : ""), "data-id": m.id },
-      h("div", { class: "bubble" + (m.kind === "photo" ? " photo" : ""), style: mine ? accentVars(acc) : null, tabindex: "0" }, quote, body, meta));
+      h("div", { class: "bubble" + (m.kind === "photo" ? " photo" : ""), style: mine ? accentVars(acc) : null, tabindex: "0" }, author, quote, body, meta));
     if (m.status === "failed") {
       el.append(h("div", { class: "failed" }, m.error || "Не отправлено",
         h("button", { type: "button", class: "link", onclick: () => store.retry(m).catch(() => {}) }, "Повторить"),
@@ -150,7 +168,7 @@ export function chatView(root, { chatId, go }) {
 
   function replyQuote(id) {
     const r = store.messagesOf(chatId).find((x) => x.id === id);
-    const author = r ? (r.senderId === me.id ? "Вы" : titleOf(peer)) : "";
+    const author = r ? (r.senderId === me.id ? "Вы" : titleOf(group ? store.state.users.get(r.senderId) : peer)) : "";
     return h("button", { type: "button", class: "quote", onclick: () => { const t = list.querySelector(`[data-id="${id}"]`); if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); t.classList.add("flash"); setTimeout(() => t.classList.remove("flash"), 1200); } } },
       h("b", {}, author || "Сообщение"), richText(r ? preview(r, "-") : "Сообщение удалено", "quote-text"));
   }
@@ -207,7 +225,13 @@ export function chatView(root, { chatId, go }) {
     const prevTop = scroller.scrollTop;
     disposeEmoji(list);
     const out = [];
-    if (!hasMore) out.push(h("div", { class: "e2e-note" }, icon("lock", 16), "Сообщения и звонки зашифрованы. Прочитать их можете только вы и собеседник."));
+    if (!hasMore) {
+      const note = !group ? "Сообщения и звонки зашифрованы. Прочитать их можете только вы и собеседник."
+        : group.isPublic ? "Публичный канал: посты видит любой, кто его найдёт."
+          : group.type === "channel" ? "Посты зашифрованы. Прочитать их могут только подписчики канала."
+            : "Сообщения зашифрованы. Прочитать их могут только участники группы.";
+      out.push(h("div", { class: "e2e-note" }, icon(group && group.isPublic ? "campaign" : "lock", 16), note));
+    }
     if (!msgs.length && !hasMore) {
       out.push(h("div", { class: "empty-chat" }, h("button", { type: "button", class: "wave", "aria-label": "Отправить 👋", onclick: () => sendText("👋") }, animoji("1f44b", 110)),
         h("p", {}, "Напишите первым — или отправьте 👋")));
@@ -362,7 +386,35 @@ export function chatView(root, { chatId, go }) {
     const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith("image/"));
     if (f) { e.preventDefault(); askPhoto(f); }
   });
-  const pane = h("section", { class: "chat-pane", "aria-label": "Переписка" }, header, scroller, composer);
+  // Подписчик канала не пишет: вместо поля ввода — «подписаться» или «без звука».
+  const readonly = h("div", { class: "composer readonly", hidden: true });
+  function setupComposer() {
+    const subscriber = group && group.type === "channel" && !store.isAdminOf(group);
+    composer.hidden = !!subscriber || (group && !group.joined);
+    readonly.hidden = !composer.hidden;
+    if (!readonly.hidden) {
+      const item = store.chatItem(chatId);
+      readonly.replaceChildren(!group.joined
+        ? h("button", { type: "button", class: "btn btn-primary wide-btn", onclick: async () => {
+          try { group = await store.joinPublic(group.id); group = await store.reloadChat(group.id); setupComposer(); renderWho(); toast("Вы подписались"); } catch (e) { toast(e.message); }
+        } }, group.type === "channel" ? "Подписаться" : "Вступить")
+        : h("button", { type: "button", class: "btn btn-text wide-btn", onclick: async () => {
+          await store.setMuted(chatId, !(item && item.muted)).catch((x) => toast(x.message)); setupComposer();
+        } }, item && item.muted ? "Включить уведомления" : "Выключить уведомления"));
+    }
+  }
+  function showInvite(c) {
+    const link = store.inviteLink(c);
+    if (!link) { toast("Ссылка появится, когда придёт ключ группы"); return; }
+    const input = h("input", { class: "input", value: link, readonly: true, "aria-label": "Ссылка-приглашение" });
+    modal(c.type === "channel" ? "Пригласить в канал" : "Пригласить в группу", h("div", { class: "invite-box" },
+      h("p", { class: "muted" }, c.isPublic ? "Публичный канал — по этой ссылке его откроет любой." : "По ссылке вступит любой, у кого она есть. Ключ шифрования — в самой ссылке, сервер его не видит."),
+      input), [
+      { label: "Закрыть" },
+      { label: "Копировать", primary: true, onclick: async (close) => { try { await navigator.clipboard.writeText(link); toast("Ссылка скопирована"); } catch (_) { input.select(); } close(); } },
+    ]);
+  }
+  const pane = h("section", { class: "chat-pane", "aria-label": "Переписка" }, header, scroller, composer, readonly);
   pane.addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.items || [])].some((i) => i.kind === "file")) { e.preventDefault(); pane.classList.add("drop"); } });
   pane.addEventListener("dragleave", (e) => { if (e.target === pane || !pane.contains(e.relatedTarget)) pane.classList.remove("drop"); });
   pane.addEventListener("drop", (e) => { e.preventDefault(); pane.classList.remove("drop"); askPhoto([...e.dataTransfer.files].find((f) => f.type.startsWith("image/"))); });
@@ -380,8 +432,14 @@ export function chatView(root, { chatId, go }) {
   window.addEventListener("focus", onFocus);
   (async () => {
     try {
-      const c = await store.chat(chatId);
-      peer = await store.user(store.peerOf(c), true);
+      let c = await store.chat(chatId);
+      if (store.isGroup(c)) {
+        c = await store.reloadChat(chatId);
+        group = c;
+        callVideo.hidden = callAudio.hidden = true;
+        setupComposer();
+        store.healGroupKeys(c).catch(() => {});
+      } else peer = await store.user(store.peerOf(c), true);
       renderWho();
       applyWallpaper();
       if (store.messagesOf(chatId).length) render(true);
