@@ -95,6 +95,22 @@ data class AdminList(val items: List<AdminRow> = emptyList())
 @Serializable
 data class AdminMe(val admin: Boolean = false)
 
+/** Какие способы входа работают на сервере (почта настроена, SMS подключены). */
+@Serializable
+data class AuthOptions(val email: Boolean = false, val phone: Boolean = false)
+
+/** Код отправлен: kind — "email" или "phone", to — куда (со звёздочками). */
+@Serializable
+data class CodeSent(val sent: Boolean = false, val kind: String = "", val to: String = "")
+
+/** Вход по почте/телефону: код верный → чей аккаунт и пропуск на 10 минут (дальше — пароль). */
+@Serializable
+data class LoginFound(val username: String = "", val name: String = "", val ticket: String = "")
+
+/** Почта и телефон (телефон видит только сам человек). */
+@Serializable
+data class ContactInfo(val email: String = "", val verified: Boolean = false, val phone: String = "")
+
 /** Участник группы (для «О группе»). */
 @Serializable
 data class GroupMember(

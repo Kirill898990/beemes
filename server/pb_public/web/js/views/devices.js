@@ -104,7 +104,33 @@ export function security(root, { go }) {
       h("p", { class: "muted small" }, "Вход по QR-коду с вашего телефона кода не требует: вы подтверждаете его сами."),
     ].filter(Boolean)); // без «null» на странице, когда почты ещё нет
   };
-  pane(root, "Почта и 2FA", go, body);
+  // Телефон: показываем, если на сервере подключены SMS или номер уже привязан
+  const phoneBox = h("div", { class: "form", hidden: true });
+  const renderPhone = (phone, smsOn) => {
+    if (!phone && !smsOn) { phoneBox.hidden = true; return; }
+    phoneBox.hidden = false;
+    const input = h("input", { class: "input", type: "tel", inputmode: "tel", placeholder: "+7 999 123-45-67", autocomplete: "tel", "aria-label": "Телефон" });
+    const code = h("input", { class: "input", inputmode: "numeric", maxlength: 6, placeholder: "Код из SMS", "aria-label": "Код из SMS", autocomplete: "one-time-code" });
+    const err = h("p", { class: "form-error", role: "alert" });
+    const codeRow = h("div", { class: "form", hidden: true }, code,
+      h("button", { type: "button", class: "btn btn-primary", onclick: async () => {
+        err.textContent = "";
+        try { const r = await store.phoneConfirm(code.value); toast("Номер привязан"); renderPhone(r.phone, smsOn); } catch (e) { err.textContent = e.message; }
+      } }, "Подтвердить"));
+    phoneBox.replaceChildren(...[
+      h("h3", {}, "Телефон"),
+      h("p", { class: "muted" }, phone ? `Привязан: ${phone}` : "По номеру можно входить без @имени — придёт SMS с кодом. Номер видите только вы."),
+      smsOn ? input : null,
+      smsOn ? h("button", { type: "button", class: "btn btn-outline", onclick: async () => {
+        err.textContent = "";
+        try { const r = await store.phoneStart(input.value); toast("SMS с кодом отправлено на " + r.to); codeRow.hidden = false; code.focus(); } catch (e) { err.textContent = e.message; }
+      } }, phone ? "Сменить номер" : "Прислать код") : null,
+      codeRow, err,
+      phone ? h("button", { type: "button", class: "btn btn-text danger-text", onclick: () => askPassword("Отвязать номер", async (pw) => { await store.phoneRemove(pw); toast("Номер отвязан"); renderPhone("", smsOn); }) }, "Отвязать номер") : null,
+    ].filter(Boolean));
+  };
+  Promise.all([store.authOptions(), store.contact().catch(() => ({}))]).then(([o, c]) => renderPhone(c.phone || "", !!o.phone));
+  pane(root, "Почта и 2FA", go, body, phoneBox);
   render();
   return () => {};
 }

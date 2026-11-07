@@ -74,8 +74,39 @@ class Repository(private val context: Context) {
     suspend fun usernameFree(name: String): UsernameCheck =
         api.get("api/bm/username/${name.trim().lowercase().removePrefix("@")}", UsernameCheck.serializer())
 
-    /** Регистрация: ключи создаются на телефоне, на сервер уходит только открытый и зашифрованный паролем закрытый. */
-    suspend fun register(name: String, username: String, password: String) {
+    /** Какие способы входа работают на сервере. */
+    suspend fun authOptions(): AuthOptions = runCatching { api.get("api/bm/auth-options", AuthOptions.serializer()) }.getOrDefault(AuthOptions())
+
+    /** Код на почту или телефон для регистрации. */
+    suspend fun signupCode(contact: String): CodeSent =
+        api.send("POST", "api/bm/signup/code", CodeSent.serializer(), buildJsonObject { put("contact", contact.trim()) })
+
+    /** Вход по почте/телефону: код → [loginVerify] → обычный вход паролем с пропуском. */
+    suspend fun loginCode(contact: String): CodeSent =
+        api.send("POST", "api/bm/login/code", CodeSent.serializer(), buildJsonObject { put("contact", contact.trim()) })
+
+    suspend fun loginVerify(contact: String, code: String): LoginFound =
+        api.send("POST", "api/bm/login/verify", LoginFound.serializer(), buildJsonObject { put("contact", contact.trim()); put("code", code.trim()) })
+
+    suspend fun contact(): ContactInfo = api.get("api/bm/contact", ContactInfo.serializer())
+
+    /** Привязать номер: SMS с кодом → куда отправлено. */
+    suspend fun phoneStart(phone: String): String =
+        api.send("POST", "api/bm/phone/start", CodeSent.serializer(), buildJsonObject { put("phone", phone.trim()) }).to
+
+    suspend fun phoneConfirm(code: String): String =
+        api.send("POST", "api/bm/phone/confirm", ContactInfo.serializer(), buildJsonObject { put("code", code.trim()) }).phone
+
+    suspend fun phoneRemove(password: String) {
+        val me = _me.value ?: return
+        api.sendRaw("POST", "api/bm/phone/remove", buildJsonObject { put("password", Crypto.authPassword(me.username, password)) })
+    }
+
+    /**
+     * Регистрация: ключи создаются на телефоне, на сервер уходит только открытый и зашифрованный паролем закрытый.
+     * contact и contactCode — необязательная почта или телефон с кодом (по ним потом можно входить).
+     */
+    suspend fun register(name: String, username: String, password: String, contact: String = "", contactCode: String = "") {
         val login = username.trim().lowercase().removePrefix("@")
         val identity = Crypto.newIdentity()
         val (wrapped, salt) = Crypto.wrapPrivateKey(identity.privateKey, password)
@@ -90,6 +121,7 @@ class Repository(private val context: Context) {
                 put("publicKey", Crypto.b64(identity.publicKey))
                 put("wrappedKey", wrapped)
                 put("wrapSalt", salt)
+                if (contact.isNotBlank()) { put("contact", contact.trim()); put("contactCode", contactCode.trim()) }
             },
         )
         login(login, password)
@@ -99,13 +131,15 @@ class Repository(private val context: Context) {
      * Вход (и на новом телефоне): закрытый ключ скачивается и расшифровывается паролем.
      * Включена 2FA — сервер просит код из письма (ApiException.twoFactor), тогда вход повторяется с code.
      */
-    suspend fun login(username: String, password: String, code: String = "") {
+    suspend fun login(username: String, password: String, code: String = "", ticket: String = "") {
         val login = username.trim().lowercase().removePrefix("@")
         val auth = api.send(
             "POST", "api/collections/users/auth-with-password", AuthResponse.serializer(),
             buildJsonObject {
                 put("identity", login); put("password", Crypto.authPassword(login, password))
                 if (code.isNotBlank()) put("code", code.trim())
+                // пропуск после кода с почты/телефона — вместо второго кода 2FA
+                if (ticket.isNotBlank()) put("ticket", ticket)
             },
         )
         token = auth.token

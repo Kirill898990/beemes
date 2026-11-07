@@ -196,6 +196,8 @@ routerAdd("POST", "/api/bm/2fa", (e) => {
 // (Ограничение «10 неверных попыток» из main.pb.js считает и неверные коды.)
 onRecordAuthWithPasswordRequest((e) => {
   if (!e.record || !e.record.getBool("twoFactor") || !e.record.validatePassword(e.password)) return e.next()
+  // Вошли кодом с почты или телефона (contacts.pb.js) — второй код не нужен.
+  if (require(`${__hooks}/contact_lib.js`).useTicket(e.app, e.record.id, (e.requestInfo().body || {}).ticket)) return e.next()
   const S = require(`${__hooks}/security_lib.js`)
   const key = "2fa:" + e.record.id
   const code = String((e.requestInfo().body || {}).code || "").trim()

@@ -185,7 +185,22 @@ export async function restore() {
 
 export const usernameFree = (name) => get(`api/bm/username/${encodeURIComponent(name.trim().toLowerCase().replace(/^@/, ""))}`);
 
-export async function register(name, username, password) {
+/** Какие способы входа работают на сервере: { email, phone }. */
+export const authOptions = () => get("api/bm/auth-options").catch(() => ({ email: false, phone: false }));
+/** Код на почту или телефон для регистрации → { kind, to }. */
+export const signupCode = (contact) => post("api/bm/signup/code", { contact });
+/** Вход по почте/телефону: код → { kind, to }; затем verify → { username, name, ticket }, дальше обычный вход паролем. */
+export const loginCode = (contact) => post("api/bm/login/code", { contact });
+export const loginVerify = (contact, code) => post("api/bm/login/verify", { contact, code: String(code || "").trim() });
+/** Почта и телефон (телефон видит только сам человек). */
+export const contact = () => get("api/bm/contact");
+export const phoneStart = (phone) => post("api/bm/phone/start", { phone });
+export const phoneConfirm = (code) => post("api/bm/phone/confirm", { code: String(code || "").trim() });
+export async function phoneRemove(password) {
+  await post("api/bm/phone/remove", { password: await C.authPassword(state.me.username, password) });
+}
+
+export async function register(name, username, password, contact = "", contactCode = "") {
   const login = username.trim().toLowerCase().replace(/^@/, "");
   const id = await C.newIdentity();
   const { wrapped, salt } = await C.wrapPrivateKey(id.privateKey, password);
@@ -193,16 +208,17 @@ export async function register(name, username, password) {
   await post("api/collections/users/records", {
     name: name.trim(), username: login, password: auth, passwordConfirm: auth,
     publicKey: C.b64(id.publicKey), wrappedKey: wrapped, wrapSalt: salt,
+    ...(contact ? { contact: contact.trim(), contactCode: String(contactCode || "").trim() } : {}),
   });
   await login_(login, password);
 }
 
-async function login_(username, password, code = "") {
+async function login_(username, password, code = "", ticket = "") {
   const login = username.trim().toLowerCase().replace(/^@/, "");
   let auth;
   try {
     auth = await api("POST", "api/collections/users/auth-with-password", {
-      body: { identity: login, password: await C.authPassword(login, password), ...(code ? { code: code.trim() } : {}) },
+      body: { identity: login, password: await C.authPassword(login, password), ...(code ? { code: code.trim() } : {}), ...(ticket ? { ticket } : {}) },
     });
   } catch (e) {
     // 2FA: пароль верный, нужен код из письма

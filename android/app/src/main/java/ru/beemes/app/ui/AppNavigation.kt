@@ -68,7 +68,8 @@ private fun AuthFlow(app: BeemesApp, onSignedIn: () -> Unit) {
     ) {
         composable("welcome") { WelcomeScreen(onRegister = { nav.navigate("register") }, onLogin = { nav.navigate("login") }) }
         composable("register") { RegisterScreen(repo, onBack = { nav.back() }, onDone = onSignedIn) }
-        composable("login") { LoginScreen(repo, onBack = { nav.back() }, onDone = onSignedIn, onQr = { nav.navigate("qr-login") }) }
+        composable("login") { LoginScreen(repo, onBack = { nav.back() }, onDone = onSignedIn, onQr = { nav.navigate("qr-login") }, onContact = { nav.navigate("login-contact") }) }
+        composable("login-contact") { ru.beemes.app.ui.auth.LoginContactScreen(repo, onBack = { nav.back() }, onDone = onSignedIn) }
         composable("qr-login") { ru.beemes.app.ui.auth.QrLoginScreen(repo, onBack = { nav.back() }, onDone = onSignedIn) }
     }
 }

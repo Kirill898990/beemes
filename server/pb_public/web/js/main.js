@@ -57,11 +57,12 @@ function route() {
     if (a === "qr-login") { devicesView.qrLogin(app, go, onSignedIn); return; }
     if (layout) { layout.sideOff && layout.sideOff(); layout.paneOff && layout.paneOff(); layout = null; }
     if (a === "login") auth.login(app, go, onSignedIn);
+    else if (a === "login-contact") auth.loginContact(app, go, onSignedIn);
     else if (a === "register") auth.register(app, go, onSignedIn);
     else auth.welcome(app, go);
     return;
   }
-  if (["welcome", "login", "register", "qr-login"].includes(a)) { go("#/"); return; }
+  if (["welcome", "login", "login-contact", "register", "qr-login"].includes(a)) { go("#/"); return; }
   const L = ensureLayout();
   currentChat = a === "chat" ? b : null;
 

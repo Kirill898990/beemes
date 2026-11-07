@@ -174,6 +174,15 @@ fun RegisterScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
     var errors by remember { mutableStateOf(mapOf<String, String>()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    // Почта или телефон — необязательно: по ним можно входить без @имени (код придёт туда)
+    var options by remember { mutableStateOf(ru.beemes.app.data.AuthOptions()) }
+    LaunchedEffect(Unit) { options = repo.authOptions() }
+    var contact by rememberSaveable { mutableStateOf("") }
+    var codeFor by rememberSaveable { mutableStateOf("") }
+    var contactCode by rememberSaveable { mutableStateOf("") }
+    var contactNote by remember { mutableStateOf<String?>(null) }
+    var sending by remember { mutableStateOf(false) }
+    val wantContact = (options.email || options.phone) && contact.isNotBlank()
 
     LaunchedEffect(username) {
         free = null
@@ -191,6 +200,8 @@ fun RegisterScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
             else if (free == false) put("username", "Это @имя уже занято")
             if (password.length < 8) put("password", "Не меньше 8 символов")
             if (password2 != password) put("password2", "Пароли не совпадают")
+            if (wantContact && codeFor != contact.trim()) put("contact", "Нажмите «Прислать код» — или сотрите почту/телефон")
+            else if (wantContact && contactCode.length != 6) put("contactCode", "Введите код из 6 цифр")
             if (!consent) put("consent", "Нужно согласие с политикой конфиденциальности")
         }
         errors = e
@@ -199,7 +210,7 @@ fun RegisterScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
         message = null
         scope.launch {
             try {
-                repo.register(name, username, password)
+                repo.register(name, username, password, if (wantContact) contact else "", if (wantContact) contactCode else "")
                 onDone()
             } catch (ex: ApiException) {
                 errors = ex.fields.mapKeys { if (it.key == "passwordConfirm") "password2" else it.key }
@@ -226,6 +237,31 @@ fun RegisterScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
                 )
                 Field(password, { password = it }, "Пароль", errors["password"], "Не меньше 8 символов", password = true)
                 Field(password2, { password2 = it }, "Повторите пароль", errors["password2"], password = true)
+                if (options.email || options.phone) {
+                    Field(
+                        contact, { contact = it.take(120); if (it.trim() != codeFor) contactCode = "" },
+                        if (options.email && options.phone) "Почта или телефон" else if (options.email) "Почта" else "Телефон",
+                        errors["contact"], contactNote ?: "Необязательно. По ним можно будет входить без @имени",
+                        keyboard = if (options.email) KeyboardType.Email else KeyboardType.Phone,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            sending = true; contactNote = null; errors = errors - "contact"
+                            scope.launch {
+                                try {
+                                    val r = repo.signupCode(contact)
+                                    codeFor = contact.trim()
+                                    contactNote = (if (r.kind == "phone") "SMS с кодом отправлено на " else "Письмо с кодом отправлено на ") + r.to
+                                } catch (ex: Exception) { errors = errors + ("contact" to (ex.message ?: "Не получилось")) }
+                                sending = false
+                            }
+                        },
+                        enabled = !sending && contact.isNotBlank(), shape = RoundedCornerShape(16.dp),
+                    ) { Text(if (codeFor.isNotBlank() && codeFor == contact.trim()) "Прислать ещё раз" else "Прислать код") }
+                    if (codeFor.isNotBlank() && codeFor == contact.trim()) {
+                        Field(contactCode, { contactCode = it.filter(Char::isDigit).take(6) }, "Код", errors["contactCode"], keyboard = KeyboardType.NumberPassword)
+                    }
+                }
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                     shape = RoundedCornerShape(18.dp),
@@ -268,7 +304,9 @@ fun RegisterScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
 }
 
 @Composable
-fun LoginScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit, onQr: () -> Unit = {}) {
+fun LoginScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit, onQr: () -> Unit = {}, onContact: () -> Unit = {}) {
+    var options by remember { mutableStateOf(ru.beemes.app.data.AuthOptions()) }
+    LaunchedEffect(Unit) { options = repo.authOptions() }
     val scope = rememberCoroutineScope()
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -334,7 +372,88 @@ fun LoginScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit, onQr: 
                     OutlinedButton(onClick = onQr, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(18.dp)) {
                         Text("Войти по QR-коду", fontSize = 16.sp)
                     }
+                    if (options.email || options.phone) {
+                        androidx.compose.material3.TextButton(onClick = onContact, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (options.email && options.phone) "Войти по почте или телефону" else if (options.email) "Войти по почте" else "Войти по номеру телефона")
+                        }
+                    }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Вход по почте или телефону: код → сервер называет аккаунт → пароль.
+ * Пароль нужен всегда: им зашифрован ключ переписки (на сервере его нет).
+ */
+@Composable
+fun LoginContactScreen(repo: Repository, onBack: () -> Unit, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var options by remember { mutableStateOf(ru.beemes.app.data.AuthOptions(email = true)) }
+    LaunchedEffect(Unit) { options = repo.authOptions() }
+    var stage by rememberSaveable { mutableStateOf("contact") }
+    var contact by rememberSaveable { mutableStateOf("") }
+    var code by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var note by remember { mutableStateOf<String?>(null) }
+    var found by remember { mutableStateOf<ru.beemes.app.data.LoginFound?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    fun next() {
+        busy = true; message = null
+        scope.launch {
+            try {
+                when (stage) {
+                    "contact" -> {
+                        val r = repo.loginCode(contact)
+                        note = (if (r.kind == "phone") "📱 Если номер привязан к аккаунту, на " else "✉️ Если почта привязана к аккаунту, на ") + r.to + " придёт код."
+                        stage = "code"
+                    }
+                    "code" -> { found = repo.loginVerify(contact, code); stage = "password" }
+                    else -> { val f = found!!; repo.login(f.username, password, ticket = f.ticket); onDone() }
+                }
+            } catch (e: Exception) { message = e.message ?: "Не получилось" }
+            busy = false
+        }
+    }
+    AuthBackground {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            AuthTop("Вход по коду", onBack)
+            Column(
+                Modifier.fillMaxSize().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { AnimatedEmoji(if (stage == "password") "1f41d" else "1f512", 96.dp) }
+                if (stage == "contact") {
+                    Field(
+                        contact, { contact = it.take(120) }, if (options.email && options.phone) "Почта или телефон" else if (options.phone) "Телефон" else "Почта",
+                        keyboard = if (options.email) KeyboardType.Email else KeyboardType.Phone,
+                    )
+                } else Text(contact, style = MaterialTheme.typography.titleMedium)
+                note?.takeIf { stage == "code" }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (stage == "code") Field(code, { code = it.filter(Char::isDigit).take(6) }, "Код", keyboard = KeyboardType.NumberPassword)
+                if (stage == "password") {
+                    found?.let { f ->
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(18.dp)) {
+                            Text(
+                                "Аккаунт ${f.name.ifBlank { f.username }} (@${f.username}). Введите пароль — он открывает ключ вашей переписки.",
+                                Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
+                    }
+                    Field(password, { password = it }, "Пароль", password = true)
+                }
+                message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                Button(
+                    onClick = ::next,
+                    enabled = !busy && when (stage) { "contact" -> contact.isNotBlank(); "code" -> code.length == 6; else -> password.isNotEmpty() },
+                    modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(18.dp),
+                ) {
+                    if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                    else Text(when (stage) { "contact" -> "Прислать код"; "code" -> "Дальше"; else -> "Войти" }, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+                androidx.compose.material3.TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Войти по @имени") }
             }
         }
     }

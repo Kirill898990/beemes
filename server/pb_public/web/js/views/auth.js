@@ -43,6 +43,13 @@ export function welcome(root, go) {
 }
 
 export function login(root, go, done) {
+  // Вход по почте или телефону — если на сервере настроена почта или SMS
+  const contactLink = h("button", { type: "button", class: "btn btn-text btn-wide", hidden: true, onclick: () => go("#/login-contact") }, "Войти по почте или телефону");
+  store.authOptions().then((o) => {
+    if (!o.email && !o.phone) return;
+    contactLink.textContent = o.email && o.phone ? "Войти по почте или телефону" : o.email ? "Войти по почте" : "Войти по номеру телефона";
+    contactLink.hidden = false;
+  });
   const user = field("@имя", { autocomplete: "username", prefix: "@", autocapitalize: "off", spellcheck: "false" });
   const pass = field("Пароль", { type: "password", autocomplete: "current-password" });
   const err = h("p", { class: "form-error", role: "alert" });
@@ -55,7 +62,8 @@ export function login(root, go, done) {
     user.wrap, pass.wrap, codeNote, code.wrap,
     h("p", { class: "muted small" }, "На новом устройстве переписка восстановится: ключ шифрования откроется вашим паролем."),
     err, btn,
-    h("button", { type: "button", class: "btn btn-text btn-wide", onclick: () => go("#/qr-login") }, "Войти по QR-коду с телефона"));
+    h("button", { type: "button", class: "btn btn-text btn-wide", onclick: () => go("#/qr-login") }, "Войти по QR-коду с телефона"),
+    contactLink);
   passwordToggle(pass.input);
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -92,6 +100,32 @@ export function register(root, go, done) {
   const pass = field("Пароль", { type: "password", autocomplete: "new-password" }, "Не меньше 8 символов");
   const pass2 = field("Повторите пароль", { type: "password", autocomplete: "new-password" });
   passwordToggle(pass.input);
+  // Почта или телефон — необязательно: по ним можно входить без @имени (код придёт туда)
+  const contact = field("Почта или телефон", { autocomplete: "email", autocapitalize: "off", spellcheck: "false", maxlength: 120 }, "Необязательно. По ним можно будет входить без @имени");
+  const sendCode = h("button", { type: "button", class: "btn btn-outline btn-small" }, "Прислать код");
+  const code = field("Код", { inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code" });
+  code.wrap.hidden = true;
+  const contactBox = h("div", { class: "contact-box", hidden: true }, contact.wrap, sendCode, code.wrap);
+  let codeFor = "";
+  store.authOptions().then((o) => {
+    if (!o.email && !o.phone) return;
+    contact.wrap.querySelector("label").textContent = o.email && o.phone ? "Почта или телефон" : o.email ? "Почта" : "Телефон";
+    if (!o.email) contact.input.setAttribute("inputmode", "tel");
+    contactBox.hidden = false;
+  });
+  contact.input.addEventListener("input", () => { if (contact.input.value.trim() !== codeFor) { code.wrap.hidden = true; code.input.value = ""; } });
+  sendCode.onclick = async () => {
+    contact.hint("");
+    sendCode.disabled = true;
+    try {
+      const r = await store.signupCode(contact.input.value);
+      codeFor = contact.input.value.trim();
+      contact.hint((r.kind === "phone" ? "SMS с кодом отправлено на " : "Письмо с кодом отправлено на ") + r.to);
+      code.wrap.hidden = false;
+      code.input.focus();
+    } catch (ex) { contact.hint(ex.message, true); }
+    sendCode.disabled = false;
+  };
   const consent = h("input", { type: "checkbox", id: "consent" });
   const err = h("p", { class: "form-error", role: "alert" });
   const btn = h("button", { type: "submit", class: "btn btn-primary btn-wide" }, "Создать аккаунт");
@@ -113,7 +147,7 @@ export function register(root, go, done) {
     }, 350);
   });
   const form = h("form", { class: "auth-form", novalidate: true },
-    name.wrap, user.wrap, pass.wrap, pass2.wrap,
+    name.wrap, user.wrap, pass.wrap, pass2.wrap, contactBox,
     h("div", { class: "note-card" }, h("span", { class: "note-ic" }, "🔐"),
       h("p", {}, "Запомните пароль. Он защищает ключ шифрования вашей переписки: без пароля восстановить сообщения нельзя — даже нам.")),
     h("label", { class: "check-row", for: "consent" }, consent,
@@ -128,12 +162,15 @@ export function register(root, go, done) {
     if (free === false) problems.push("Это @имя уже занято");
     if (pass.input.value.length < 8) problems.push("Пароль: не меньше 8 символов");
     if (pass.input.value !== pass2.input.value) problems.push("Пароли не совпадают");
+    const wantContact = !contactBox.hidden && contact.input.value.trim();
+    if (wantContact && (code.wrap.hidden || codeFor !== contact.input.value.trim())) problems.push("Нажмите «Прислать код» — или сотрите почту/телефон");
+    else if (wantContact && code.input.value.trim().length !== 6) problems.push("Введите код из 6 цифр");
     if (!consent.checked) problems.push("Нужно согласие с политикой конфиденциальности");
     if (problems.length) { err.textContent = problems[0]; return; }
     btn.disabled = true;
     btn.textContent = "Создаём ключи шифрования…";
     try {
-      await store.register(name.input.value, user.input.value, pass.input.value);
+      await store.register(name.input.value, user.input.value, pass.input.value, wantContact ? contact.input.value : "", wantContact ? code.input.value : "");
       done();
     } catch (ex) {
       err.textContent = ex.message || "Не получилось создать аккаунт";
@@ -146,6 +183,69 @@ export function register(root, go, done) {
     form,
   ));
   name.input.focus();
+}
+
+/**
+ * Вход по почте или телефону: код → сервер называет аккаунт → пароль.
+ * Пароль нужен всегда: им зашифрован ключ переписки (на сервере его нет).
+ */
+export function loginContact(root, go, done) {
+  const contact = field("Почта или телефон", { autocomplete: "email", autocapitalize: "off", spellcheck: "false", maxlength: 120 });
+  const code = field("Код", { inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code" });
+  const pass = field("Пароль", { type: "password", autocomplete: "current-password" });
+  passwordToggle(pass.input);
+  const who = h("div", { class: "note-card", hidden: true });
+  const note = h("p", { class: "muted small" });
+  const err = h("p", { class: "form-error", role: "alert" });
+  const btn = h("button", { type: "submit", class: "btn btn-primary btn-wide" }, "Прислать код");
+  let stage = "contact";
+  let found = null;
+  const show = () => {
+    contact.input.readOnly = stage !== "contact";
+    code.wrap.hidden = stage !== "code";
+    pass.wrap.hidden = stage !== "password";
+    who.hidden = stage !== "password";
+    btn.textContent = stage === "contact" ? "Прислать код" : stage === "code" ? "Дальше" : "Войти";
+  };
+  store.authOptions().then((o) => {
+    contact.wrap.querySelector("label").textContent = o.email && o.phone ? "Почта или телефон" : o.phone ? "Телефон" : "Почта";
+    if (!o.email) contact.input.setAttribute("inputmode", "tel");
+  });
+  const form = h("form", { class: "auth-form", novalidate: true }, contact.wrap, note, code.wrap, who, pass.wrap, err, btn,
+    h("button", { type: "button", class: "btn btn-text btn-wide", onclick: () => go("#/login") }, "Войти по @имени"));
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    btn.disabled = true;
+    try {
+      if (stage === "contact") {
+        const r = await store.loginCode(contact.input.value);
+        note.textContent = (r.kind === "phone" ? "📱 Если номер привязан к аккаунту, на " : "✉️ Если почта привязана к аккаунту, на ") + r.to + " придёт код.";
+        stage = "code";
+        show();
+        code.input.focus();
+      } else if (stage === "code") {
+        found = await store.loginVerify(contact.input.value, code.input.value);
+        who.replaceChildren(h("span", { class: "note-ic" }, "🐝"), h("p", {}, "Аккаунт ", h("b", {}, found.name || found.username), " (@" + found.username + "). Введите пароль — он открывает ключ вашей переписки."));
+        note.textContent = "";
+        stage = "password";
+        show();
+        pass.input.focus();
+      } else {
+        await store.login(found.username, pass.input.value, "", found.ticket);
+        done();
+        return;
+      }
+    } catch (ex) { err.textContent = ex.message || "Не получилось"; }
+    btn.disabled = false;
+  };
+  show();
+  root.replaceChildren(shell(
+    h("div", { class: "auth-top" }, h("button", { type: "button", class: "icon-btn", "aria-label": "Назад", onclick: () => go("#/login") }, icon("back")), h("h1", {}, "Вход по коду")),
+    h("div", { class: "auth-hero small" }, h("img", { class: "logo-float", src: "../img/logo.svg", alt: "", width: 84, height: 95 })),
+    form,
+  ));
+  contact.input.focus();
 }
 
 /** Вход сохранён, но ключа на этом устройстве нет — достаточно пароля. */

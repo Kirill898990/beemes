@@ -342,6 +342,17 @@ fun SecurityScreen(repo: Repository, onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var ask by remember { mutableStateOf<Pair<String, suspend (String) -> Unit>?>(null) }
     fun toast(t: String) = context.toast(t)
+    // Телефон: показываем, если на сервере подключены SMS или номер уже привязан
+    var phone by remember { mutableStateOf("") }
+    var smsOn by remember { mutableStateOf(false) }
+    var newPhone by remember { mutableStateOf("") }
+    var phoneCode by remember { mutableStateOf("") }
+    var phoneSentTo by remember { mutableStateOf<String?>(null) }
+    var phoneError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        smsOn = repo.authOptions().phone
+        phone = runCatching { repo.contact().phone }.getOrDefault("")
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -394,6 +405,51 @@ fun SecurityScreen(repo: Repository, onBack: () -> Unit) {
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     if (hasEmail) {
                         TextButton(onClick = { ask = "Отвязать почту" to { pw -> repo.emailRemove(pw); toast("Почта отвязана") } }) { Text("Отвязать почту", color = Danger) }
+                    }
+                }
+            }
+            if (smsOn || phone.isNotBlank()) Section("Телефон") {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        if (phone.isNotBlank()) "Привязан: $phone" else "По номеру можно входить без @имени — придёт SMS с кодом. Номер видите только вы.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (smsOn) {
+                        OutlinedTextField(
+                            newPhone, { newPhone = it.take(20) }, label = { Text("Телефон") }, placeholder = { Text("+7 999 123-45-67") }, singleLine = true,
+                            shape = RoundedCornerShape(16.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                busy = true; phoneError = null
+                                scope.launch {
+                                    runCatching { repo.phoneStart(newPhone) }.onSuccess { phoneSentTo = it; toast("SMS с кодом отправлено на $it") }.onFailure { phoneError = it.message }
+                                    busy = false
+                                }
+                            },
+                            enabled = !busy && newPhone.isNotBlank(), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+                        ) { Text(if (phone.isNotBlank()) "Сменить номер" else "Прислать код") }
+                    }
+                    if (phoneSentTo != null) {
+                        OutlinedTextField(
+                            phoneCode, { phoneCode = it.filter(Char::isDigit).take(6) }, label = { Text("Код из SMS") }, singleLine = true,
+                            shape = RoundedCornerShape(16.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), modifier = Modifier.fillMaxWidth(),
+                        )
+                        Button(
+                            onClick = {
+                                busy = true; phoneError = null
+                                scope.launch {
+                                    runCatching { repo.phoneConfirm(phoneCode) }.onSuccess { phone = it; phoneSentTo = null; phoneCode = ""; newPhone = ""; toast("Номер привязан") }
+                                        .onFailure { phoneError = it.message }
+                                    busy = false
+                                }
+                            },
+                            enabled = !busy && phoneCode.length == 6, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+                        ) { Text("Подтвердить") }
+                    }
+                    phoneError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (phone.isNotBlank()) {
+                        TextButton(onClick = { ask = "Отвязать номер" to { pw -> repo.phoneRemove(pw); phone = ""; toast("Номер отвязан") } }) { Text("Отвязать номер", color = Danger) }
                     }
                 }
             }
