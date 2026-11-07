@@ -14,14 +14,30 @@ export async function resubscribe() {
   const t = topics();
   if (t.join() === lastTopics) return;
   lastTopics = t.join();
-  try { await api("POST", "api/realtime", { body: { clientId, subscriptions: t } }); } catch (_) { lastTopics = ""; }
+  try {
+    await api("POST", "api/realtime", { body: { clientId, subscriptions: t } });
+    subscribeFails = 0;
+  } catch (_) {
+    // Без подписки соединение открыто, но события не идут — повторяем, а после трёх неудач подключаемся заново.
+    lastTopics = "";
+    clearTimeout(subscribeTimer);
+    if (++subscribeFails >= 3) { subscribeFails = 0; start(); } else subscribeTimer = setTimeout(resubscribe, 2000 * subscribeFails);
+  }
 }
+let subscribeFails = 0;
+let subscribeTimer = null;
 let retryTimer = null;
+/** Когда соединение последний раз подавало признаки жизни. PocketBase сам закрывает тихое соединение через 5 минут. */
+let aliveAt = 0;
+const alive = () => { aliveAt = Date.now(); };
 
 export function start() {
   stop();
   source = new EventSource(url("api/realtime"));
+  alive();
+  source.onopen = alive;
   source.addEventListener("PB_CONNECT", async (e) => {
+    alive();
     try {
       clientId = JSON.parse(e.data).clientId;
       lastTopics = "";
@@ -33,6 +49,7 @@ export function start() {
     } catch (_) { /* переподключимся */ }
   });
   source.addEventListener("messages", async (e) => {
+    alive();
     const { action, record } = JSON.parse(e.data);
     if (action === "delete") store.removeMessage(record.chat, record.id);
     else {
@@ -40,14 +57,15 @@ export function start() {
       if (msg && action === "create") store.emit("new-message", msg);
     }
   });
-  source.addEventListener("chat_state", (e) => store.applyState(JSON.parse(e.data).record));
-  source.addEventListener("chats", () => store.refreshChats().catch(() => {}));
+  source.addEventListener("chat_state", (e) => { alive(); store.applyState(JSON.parse(e.data).record); });
+  source.addEventListener("chats", () => { alive(); store.refreshChats().catch(() => {}); });
   // «В сети» собеседников: подписка на каждого (users/<id>), событие называется так же.
   source.onmessage = null;
-  const onUser = (e) => { try { store.applyUser(JSON.parse(e.data).record); store.emit("users"); store.emit("chats"); } catch (_) { /* ignore */ } };
+  const onUser = (e) => { alive(); try { store.applyUser(JSON.parse(e.data).record); store.emit("users"); store.emit("chats"); } catch (_) { /* ignore */ } };
   store.peerIds().forEach((id) => source.addEventListener("users/" + id, onUser));
   userListener = onUser;
   source.addEventListener("call_signals", (e) => {
+    alive();
     const { action, record } = JSON.parse(e.data);
     if (action === "create") store.emit("signal", record);
   });
@@ -80,11 +98,17 @@ store.on("chats", () => {
 });
 const listened = new Set();
 
+// Связь «зависла» молча (дольше 5,5 минуты ни событий, ни переподключения) — подключаемся заново.
+setInterval(() => { if (source && Date.now() - aliveAt > 330000) start(); }, 30000);
+// Интернет вернулся (или сменилась сеть) — не ждём, пока браузер заметит сам.
+window.addEventListener("online", () => { if (source) start(); });
+
 export function stop() {
   clientId = "";
   lastTopics = "";
   listened.clear();
   clearTimeout(retryTimer);
+  clearTimeout(subscribeTimer);
   if (source) source.close();
   source = null;
 }

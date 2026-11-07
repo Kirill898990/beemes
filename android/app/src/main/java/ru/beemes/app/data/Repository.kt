@@ -66,7 +66,7 @@ class Repository(private val context: Context) {
     /** Какой чат сейчас открыт (уведомления о нём не нужны, сообщения сразу «прочитаны»). */
     @Volatile var openChatId: String? = null
 
-    val realtime = Realtime(this)
+    val realtime = Realtime(this, context)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // ---------- Вход и регистрация ----------
@@ -847,16 +847,35 @@ class Repository(private val context: Context) {
         flow.update { it + pending }
         try {
             val (sealed, epoch) = seal(chatId, content)
-            val fields = mapOf("chat" to chatId, "sender" to me.id, "kind" to kind, "body" to sealed.body, "nonce" to sealed.nonce) +
+            // Свой id сообщения: если связь оборвалась, повтор с тем же id не создаст дубль.
+            val recordId = newRecordId()
+            // pushLater — уведомления попросим отдельно (ниже), чтобы отправка не ждала Firebase.
+            val fields = mapOf("id" to recordId, "chat" to chatId, "sender" to me.id, "kind" to kind, "body" to sealed.body, "nonce" to sealed.nonce, "pushLater" to "1") +
                 (if (replyTo.isNotBlank()) mapOf("replyTo" to replyTo) else emptyMap()) +
                 (if (epoch != null) mapOf("epoch" to epoch.toString()) else emptyMap())
-            val saved = if (file != null) {
-                api.multipart("POST", "api/collections/messages/records", MessageRecord.serializer(), fields, mapOf("file" to Triple("photo.bin", "application/octet-stream", file)))
-            } else {
-                api.send("POST", "api/collections/messages/records", MessageRecord.serializer(), buildJsonObject {
-                    fields.forEach { (k, v) -> if (k == "epoch") put(k, v.toInt()) else put(k, v) }
-                })
+            var result: MessageRecord? = null
+            var attempt = 0
+            while (result == null) {
+                try {
+                    result = if (file != null) {
+                        api.multipart("POST", "api/collections/messages/records", MessageRecord.serializer(), fields, mapOf("file" to Triple("photo.bin", "application/octet-stream", file)))
+                    } else {
+                        api.send("POST", "api/collections/messages/records", MessageRecord.serializer(), buildJsonObject {
+                            fields.forEach { (k, v) -> if (k == "epoch") put(k, v.toInt()) else put(k, v) }
+                        })
+                    }
+                } catch (e: ApiException) {
+                    when {
+                        // прошлая попытка всё-таки дошла (ответ потерялся) — сообщение уже на сервере
+                        e.status == 400 && "id" in e.fields -> result = api.get("api/collections/messages/records/$recordId", MessageRecord.serializer())
+                        // нет связи или сервер занят — пробуем ещё (тем же id)
+                        (e.status == 0 || e.status == 429 || e.status >= 500) && attempt < 4 -> kotlinx.coroutines.delay(longArrayOf(1500, 3000, 6000, 10000)[attempt++])
+                        else -> throw e
+                    }
+                }
             }
+            val saved = result!!
+            scope.launch { runCatching { api.sendRaw("POST", "api/bm/messages/$recordId/notify") } }
             val msg = pending.copy(id = saved.id, created = parseTime(saved.created) ?: pending.created, file = saved.file, status = SendStatus.SENT)
             flow.update { list -> (list.filterNot { it.id == localId || it.id == saved.id } + msg).sortedWith(compareBy({ it.status == SendStatus.SENDING || it.status == SendStatus.FAILED }, { it.created })) }
             onNewMessage(msg)
@@ -864,6 +883,11 @@ class Repository(private val context: Context) {
             flow.update { list -> list.map { if (it.id == localId) it.copy(status = SendStatus.FAILED, error = e.message) else it } }
         }
     }
+
+    private val idRandom = java.security.SecureRandom()
+
+    /** id записи PocketBase: 15 символов a-z0-9. */
+    private fun newRecordId(): String = buildString { repeat(15) { append("abcdefghijklmnopqrstuvwxyz0123456789"[idRandom.nextInt(36)]) } }
 
     /** Повторить неотправленное. */
     suspend fun retry(msg: Msg) {

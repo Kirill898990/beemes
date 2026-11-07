@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
  * Новое — сразу, без обновления экрана: PocketBase присылает события (Server-Sent Events), пока приложение открыто.
  * Сервер сам проверяет права: приходят только свои чаты, сообщения и звонки.
  */
-class Realtime(private val repo: Repository) {
+class Realtime(private val repo: Repository, private val context: android.content.Context) {
     @Serializable private data class Connect(val clientId: String = "")
     @Serializable private data class MessageEvent(val action: String = "", val record: MessageRecord = MessageRecord())
     @Serializable private data class StateEvent(val action: String = "", val record: ChatState = ChatState())
@@ -51,9 +51,27 @@ class Realtime(private val repo: Repository) {
     @Volatile private var clientId = ""
     @Volatile private var lastTopics = ""
     private var peersJob: Job? = null
+    private var subscribeRetry: Job? = null
+    /** Когда соединение последний раз подавало признаки жизни (открылось или пришло событие). */
+    @Volatile private var aliveAt = 0L
+
+    // Сменилась сеть (Wi-Fi ↔ мобильный интернет) — старое соединение «зависает» молча: подключаемся заново.
+    private val connectivity = context.getSystemService(android.net.ConnectivityManager::class.java)
+    @Volatile private var network: android.net.Network? = null
+    private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(n: android.net.Network) {
+            val changed = network != null && network != n
+            network = n
+            if (changed && wanted) restart()
+        }
+    }
+    private var watching = false
 
     fun start() {
         wanted = true
+        if (!watching) {
+            watching = runCatching { connectivity?.registerDefaultNetworkCallback(networkCallback) }.isSuccess && connectivity != null
+        }
         if (source == null) connect()
         // Новые собеседники — следим и за их «в сети».
         if (peersJob?.isActive != true) peersJob = scope.launch {
@@ -76,7 +94,33 @@ class Realtime(private val repo: Repository) {
                 put("clientId", id)
                 put("subscriptions", JsonArray(t.map { JsonPrimitive(it) }))
             })
-        }.onFailure { lastTopics = "" }
+        }.onSuccess { subscribeFails = 0 }.onFailure {
+            // Без подписки соединение открыто, но события не идут — повторяем, а не ждём следующего обновления чатов.
+            lastTopics = ""
+            if (++subscribeFails >= 3) { subscribeFails = 0; restart() }
+            else { subscribeRetry?.cancel(); subscribeRetry = scope.launch { delay(2000L * subscribeFails); resubscribe() } }
+        }
+    }
+    @Volatile private var subscribeFails = 0
+
+    /** Соединение живо? PocketBase закрывает молчащее соединение через 5 минут — если и этого не было, связь «зависла». */
+    fun checkAlive() {
+        if (!wanted) return
+        if (source == null && retryJob?.isActive != true) connect()
+        else if (aliveAt > 0 && System.currentTimeMillis() - aliveAt > 330_000) restart()
+    }
+
+    /** Подключиться заново (и забрать всё, что пришло, пока связи не было). */
+    fun restart() {
+        if (!wanted) return
+        retryJob?.cancel()
+        subscribeRetry?.cancel()
+        clientId = ""
+        lastTopics = ""
+        val old = source
+        source = null
+        old?.cancel()
+        connect()
     }
 
     fun stop() {
@@ -85,20 +129,36 @@ class Realtime(private val repo: Repository) {
         lastTopics = ""
         peersJob?.cancel()
         retryJob?.cancel()
-        source?.cancel()
+        subscribeRetry?.cancel()
+        val old = source
         source = null
+        old?.cancel()
+        if (watching) { runCatching { connectivity?.unregisterNetworkCallback(networkCallback) }; watching = false; network = null }
     }
 
-    private fun connect() {
-        val client = repo.api.client.newBuilder().readTimeout(0, TimeUnit.SECONDS).build()
+    // Молчит дольше 5,5 минуты (сервер сам закрывает тихое соединение через 5) — значит, связь оборвалась незаметно.
+    private val sseClient by lazy { repo.api.client.newBuilder().readTimeout(330, TimeUnit.SECONDS).build() }
+
+    @Synchronized private fun connect() {
+        if (source != null) return
+        aliveAt = System.currentTimeMillis()
         val request = Request.Builder().url(repo.api.url("api/realtime")).build()
-        source = EventSources.createFactory(client).newEventSource(request, object : EventSourceListener() {
+        source = EventSources.createFactory(sseClient).newEventSource(request, object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) {
+                if (eventSource === source) aliveAt = System.currentTimeMillis()
+            }
+
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                if (eventSource !== source) return
+                aliveAt = System.currentTimeMillis()
                 runCatching { handle(type.orEmpty(), data) }
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                // Старое соединение (после restart) — не трогаем новое.
+                if (eventSource !== source) return
                 source = null
+                clientId = ""
                 if (wanted) {
                     retryJob?.cancel()
                     retryJob = scope.launch { delay(3000); if (wanted && source == null) connect() }

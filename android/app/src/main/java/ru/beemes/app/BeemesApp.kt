@@ -54,6 +54,8 @@ class BeemesApp : Application() {
         pinger = repository.scope.launch {
             while (isActive) {
                 repository.presence(true)
+                // Связь в реальном времени не «зависла»? (иначе новые сообщения не появляются до перезапуска)
+                repository.realtime.checkAlive()
                 delay(20_000)
             }
         }

@@ -60,7 +60,9 @@ function sendMail(app, to, subject, html) {
     app.newMailClient().send(msg)
   } catch (err) {
     app.logger().warn("mail failed", "error", String(err))
-    throw new BadRequestError("Не получилось отправить письмо: почта на сервере не настроена. Сообщите администратору.")
+    // Почта не включена — одно; включена, но почтовый сервер не принял письмо (логин, пароль, порт) — другое.
+    if (!app.settings().smtp.enabled) throw new BadRequestError("Не получилось отправить письмо: почта на сервере не настроена. Сообщите администратору.")
+    throw new BadRequestError("Почтовый сервер не принял письмо. Администратору: проверьте Settings → Mail settings (логин, пароль приложения, порт) и Logs → «mail failed».")
   }
 }
 

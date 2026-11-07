@@ -93,7 +93,7 @@ export function security(root, { go }) {
       toast(tfa.checked ? "2FA включена: при входе по паролю понадобится код из письма" : "2FA выключена");
       render();
     }, () => { tfa.checked = !tfa.checked; });
-    body.replaceChildren(
+    body.replaceChildren(...[
       h("h3", {}, "Почта"),
       h("p", { class: "muted" }, hasEmail ? `Привязана: ${me.email}` : "Нужна для подтверждения входа. Почту видите только вы."),
       email, sendBtn, codeRow, err,
@@ -101,7 +101,8 @@ export function security(root, { go }) {
       h("h3", {}, "Двухфакторная защита"),
       h("label", { class: "row-item card" }, icon("shield"), h("span", {}, h("b", {}, "Код из письма при входе"),
         h("small", {}, hasEmail ? "При входе по паролю на новом устройстве попросим ещё код с вашей почты" : "Сначала привяжите почту")), tfa),
-      h("p", { class: "muted small" }, "Вход по QR-коду с вашего телефона кода не требует: вы подтверждаете его сами."));
+      h("p", { class: "muted small" }, "Вход по QR-коду с вашего телефона кода не требует: вы подтверждаете его сами."),
+    ].filter(Boolean)); // без «null» на странице, когда почты ещё нет
   };
   pane(root, "Почта и 2FA", go, body);
   render();

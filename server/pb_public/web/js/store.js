@@ -904,16 +904,29 @@ async function send(chatId, kind, content, replyTo = "", file = null) {
   setMessages(chatId, sortMsgs([...messagesOf(chatId), pending]));
   try {
     const sealed = await seal(chatId, content);
-    const fields = { chat: chatId, sender: state.me.id, kind, body: sealed.body, nonce: sealed.nonce };
+    // Свой id: если связь оборвалась, повтор с тем же id не создаст дубль.
+    // pushLater — уведомления попросим отдельным запросом, чтобы отправка не ждала Firebase.
+    const fields = { id: newRecordId(), chat: chatId, sender: state.me.id, kind, body: sealed.body, nonce: sealed.nonce, pushLater: "1" };
     if (sealed.epoch !== undefined) fields.epoch = sealed.epoch;
     if (replyTo) fields.replyTo = replyTo;
-    let saved;
-    if (file) {
-      const form = new FormData();
-      Object.entries(fields).forEach(([k, v]) => form.append(k, v));
-      form.append("file", new Blob([file], { type: "application/octet-stream" }), "photo.bin");
-      saved = await api("POST", "api/collections/messages/records", { body: form });
-    } else saved = await post("api/collections/messages/records", fields);
+    let saved = null;
+    for (let attempt = 0; !saved; attempt++) {
+      try {
+        if (file) {
+          const form = new FormData();
+          Object.entries(fields).forEach(([k, v]) => form.append(k, v));
+          form.append("file", new Blob([file], { type: "application/octet-stream" }), "photo.bin");
+          saved = await api("POST", "api/collections/messages/records", { body: form });
+        } else saved = await post("api/collections/messages/records", fields);
+      } catch (e) {
+        // прошлая попытка всё-таки дошла (ответ потерялся) — сообщение уже на сервере
+        if (e.status === 400 && e.raw && e.raw.id) saved = await get(`api/collections/messages/records/${fields.id}`);
+        // нет связи или сервер занят — пробуем ещё, тем же id
+        else if ((!e.status || e.status === 429 || e.status >= 500) && attempt < 4) await new Promise((r) => setTimeout(r, [1500, 3000, 6000, 10000][attempt]));
+        else throw e;
+      }
+    }
+    post(`api/bm/messages/${fields.id}/notify`).catch(() => {});
     const msg = { ...pending, id: saved.id, created: parseTime(saved.created) || pending.created, file: saved.file || "", status: "sent", localId };
     const list = messagesOf(chatId);
     // realtime мог принести это сообщение раньше ответа сервера
@@ -924,6 +937,12 @@ async function send(chatId, kind, content, replyTo = "", file = null) {
     setMessages(chatId, messagesOf(chatId).map((m) => (m.id === localId ? { ...m, status: "failed", error: e.message } : m)));
     throw e;
   }
+}
+
+/** id записи PocketBase: 15 символов a-z0-9. */
+function newRecordId() {
+  const abc = "abcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from(crypto.getRandomValues(new Uint8Array(15)), (b) => abc[b % 36]).join("");
 }
 
 export const sendText = (chatId, text, replyTo = "") => send(chatId, "text", { t: text.trim() }, replyTo);

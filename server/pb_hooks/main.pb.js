@@ -202,6 +202,15 @@ onRecordCreateRequest((e) => {
 onRecordCreateRequest((e) => {
   if (e.hasSuperuserAuth()) return e.next()
   const { otherMember, hasBlocked } = require(`${__hooks}/lib.js`)
+  // Лимит на человека (лимиты PocketBase — на IP-адрес, а с одного адреса пишут сотни людей).
+  const rateKey = "msgrate:" + e.auth.id
+  const now = Date.now()
+  const rate = e.app.store().get(rateKey)
+  if (rate && now - rate.t < 10000) {
+    if (rate.n >= 60) throw new TooManyRequestsError("Слишком много сообщений подряд — подождите пару секунд")
+    rate.n++
+    e.app.store().set(rateKey, rate)
+  } else e.app.store().set(rateKey, { t: now, n: 1 })
   const chat = e.app.findRecordById("chats", e.record.getString("chat"))
   const type = chat.getString("type")
   if (!type) {
@@ -229,60 +238,63 @@ onRecordCreateRequest((e) => {
     if (!r || r.getString("chat") !== chat.id) e.record.set("replyTo", "")
   }
   e.record.set("editedAt", "")
+  // Приложение само попросит разослать уведомления (/api/bm/messages/{id}/notify) — отправка не ждёт Firebase.
+  const later = (e.requestInfo().body || {}).pushLater
+  if (later === true || later === "1" || later === "true") {
+    if (!e.record.id) e.record.set("id", $security.randomStringWithAlphabet(15, "abcdefghijklmnopqrstuvwxyz0123456789"))
+    e.app.store().set("pushlater:" + e.record.id, Date.now())
+  }
   e.next()
 }, "messages")
 
 onRecordAfterCreateSuccess((e) => {
-  const { iso, otherMember, displayName } = require(`${__hooks}/lib.js`)
-  const { pushToUser } = require(`${__hooks}/fcm_lib.js`)
+  const { iso } = require(`${__hooks}/lib.js`)
   const msg = e.record
-  const chat = e.app.findRecordById("chats", msg.getString("chat"))
+  const chatId = msg.getString("chat")
   const now = iso(Date.now())
-  e.app.db().newQuery("UPDATE chats SET lastMessageAt = {:t}, lastMessage = {:m} WHERE id = {:id}").bind({ t: now, m: msg.id, id: chat.id }).execute()
+  e.app.db().newQuery("UPDATE chats SET lastMessageAt = {:t}, lastMessage = {:m} WHERE id = {:id}").bind({ t: now, m: msg.id, id: chatId }).execute()
   // Новое сообщение возвращает скрытый чат в список у обоих.
-  e.app.db().newQuery("UPDATE chat_state SET hidden = 0 WHERE chat = {:c}").bind({ c: chat.id }).execute()
-  const sender = e.app.findRecordById("users", msg.getString("sender"))
-  const body = msg.getString("body")
-  const type = chat.getString("type")
-  // Личный чат — собеседнику; группа и канал — всем участникам, кроме автора
-  // (больших каналов — без уведомлений: сообщения придут, когда откроют beemes).
-  const recipients = type ? chat.getStringSlice("members").filter((m) => m !== sender.id) : [otherMember(chat, sender.id)]
-  if (recipients.length <= 300) {
-    const mutedSet = {}
-    e.app.findRecordsByFilter("chat_state", "chat = {:c} && muted = true", "", 0, 0, { c: chat.id }).forEach((st) => { mutedSet[st.getString("user")] = true })
-    const epoch = msg.getInt("epoch")
-    const keys = {}
-    if (type && epoch > 0) {
-      e.app.findRecordsByFilter("chat_keys", "chat = {:c} && epoch = {:e}", "", 0, 0, { c: chat.id, e: epoch }).forEach((k) => { keys[k.getString("user")] = k })
-    }
-    const fromKeys = {}
-    recipients.forEach((to) => {
-      const muted = !!mutedSet[to]
-      const data = {
-        type: "msg", chat: chat.id, id: msg.id, kind: msg.getString("kind"),
-        sender: sender.id, senderName: displayName(sender), senderKey: sender.getString("publicKey"),
-        // Текст зашифрован — расшифрует только телефон получателя. Длинные сообщения телефон скачает сам.
-        body: body.length <= 3000 ? body : "", nonce: body.length <= 3000 ? msg.getString("nonce") : "",
-        silent: muted ? "1" : "",
-      }
-      if (type) {
-        data.chatType = type
-        data.chatTitle = chat.getString("title")
-        data.epoch = String(epoch)
-        if (epoch === 0) data.openKey = chat.getString("openKey")
-        const k = keys[to]
-        if (k) {
-          // Ключ группы, зашифрованный лично для получателя (сервер его не знает).
-          const from = k.getString("from")
-          if (!(from in fromKeys)) { try { fromKeys[from] = e.app.findRecordById("users", from).getString("publicKey") } catch (_) { fromKeys[from] = "" } }
-          data.keyBody = k.getString("body"); data.keyNonce = k.getString("nonce"); data.keyFrom = from; data.keyFromPub = fromKeys[from]
-        }
-      }
-      try { pushToUser(e.app, to, data, !muted, 86400) } catch (err) { e.app.logger().warn("push failed", "error", String(err)) }
-    })
+  e.app.db().newQuery("UPDATE chat_state SET hidden = 0 WHERE chat = {:c}").bind({ c: chatId }).execute()
+  // Новые версии приложения просят уведомить получателей отдельным запросом (pushLater) — отправка не ждёт Firebase.
+  if (e.app.store().get("pushlater:" + msg.id)) {
+    e.app.store().remove("pushlater:" + msg.id)
+    e.app.store().set("pushq:" + msg.id, { sender: msg.getString("sender"), t: Date.now() })
+  } else {
+    try { require(`${__hooks}/notify_lib.js`).pushMessage(e.app, msg) } catch (err) { e.app.logger().warn("push failed", "error", String(err)) }
   }
   e.next()
 }, "messages")
+
+// Разослать уведомления о только что отправленном сообщении (приложение вызывает сразу после отправки).
+routerAdd("POST", "/api/bm/messages/{id}/notify", (e) => {
+  const id = e.request.pathValue("id")
+  const q = e.app.store().get("pushq:" + id)
+  if (!q) return e.json(200, { queued: false })
+  if (q.sender !== e.auth.id) throw new NotFoundError("Не найдено")
+  e.app.store().remove("pushq:" + id)
+  let msg = null
+  try { msg = e.app.findRecordById("messages", id) } catch (_) {}
+  if (msg) require(`${__hooks}/notify_lib.js`).pushMessage(e.app, msg)
+  return e.json(200, { queued: true })
+}, $apis.requireAuth("users"))
+
+// Страховка: если приложение не успело попросить (закрыли сразу после отправки) — разошлём сами.
+cronAdd("bm_push_flush", "* * * * *", () => {
+  const all = $app.store().getAll()
+  const now = Date.now()
+  Object.keys(all).forEach((k) => {
+    if (k.indexOf("pushq:") === 0) {
+      const q = all[k]
+      if (!q || now - q.t < 15000) return
+      $app.store().remove(k)
+      let msg = null
+      try { msg = $app.findRecordById("messages", k.slice(6)) } catch (_) {}
+      if (msg) { try { require(`${__hooks}/notify_lib.js`).pushMessage($app, msg) } catch (err) { $app.logger().warn("push failed", "error", String(err)) } }
+    } else if (k.indexOf("pushlater:") === 0 && now - Number(all[k]) > 600000) {
+      $app.store().remove(k)
+    }
+  })
+})
 
 // Удалили последнее сообщение — в списке чатов показываем предыдущее.
 onRecordAfterDeleteSuccess((e) => {
