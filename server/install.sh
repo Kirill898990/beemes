@@ -405,9 +405,9 @@ if [ "$HOMESRV" = 1 ]; then
       fi
     fi
     unset TUNA_KEY
-    # Адреса: основной и www (www ведёт на основной). WWW=0 — без www.
+    # Адрес — основной. WWW=1 — ещё и www (ведёт на основной); его тоже нужно добавить в my.tuna.am → Домены.
     TUNA_HOSTS="$DOMAIN"
-    if [ "${WWW:-1}" != 0 ] && [ "$(printf '%s' "$DOMAIN" | tr -cd '.' | wc -c)" = 1 ]; then TUNA_HOSTS="$DOMAIN www.$DOMAIN"; fi
+    if [ "${WWW:-0}" = 1 ] && [ "$(printf '%s' "$DOMAIN" | tr -cd '.' | wc -c)" = 1 ]; then TUNA_HOSTS="$DOMAIN www.$DOMAIN"; fi
     TUNA_UNITS=""
     if [ -s "$TUNA_ENV" ]; then
       for H in $TUNA_HOSTS; do
@@ -464,7 +464,7 @@ if [ "$HOMESRV" = 1 ]; then
     echo "SHA=\"\$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/$REPO/commits/$BRANCH)\""
     echo '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 0'
     echo "[ \"\$(cat $DIR/.ref 2>/dev/null || true)\" = \"\$SHA\" ] && exit 0"
-    echo "curl -fsSL \"https://raw.githubusercontent.com/$REPO/\$SHA/server/install.sh\" | REF=\"\$SHA\" TUNNEL=$TUNNEL bash -s -- $DOMAIN"
+    echo "curl -fsSL \"https://raw.githubusercontent.com/$REPO/\$SHA/server/install.sh\" | REF=\"\$SHA\" TUNNEL=$TUNNEL WWW=${WWW:-0} bash -s -- $DOMAIN"
   } > /usr/local/sbin/beemes-autoupdate
   chmod 755 /usr/local/sbin/beemes-autoupdate
   printf '%s\n' '[Unit]' 'Description=Автообновление beemes с GitHub' 'After=network-online.target' 'Wants=network-online.target' '' \
@@ -487,7 +487,7 @@ if [ "$HOMESRV" = 1 ]; then
     echo "  Routes → Add route → Published application: $DOMAIN и www.$DOMAIN → Service URL: http://localhost:$PORT"
     echo "  Панель администратора: https://$DOMAIN_INPUT/_/   ·   журнал: journalctl -u beemes -f   ·   туннель: systemctl status cloudflared"
   else
-    echo "  Адрес: https://$DOMAIN_INPUT/ — домены $TUNA_HOSTS должны быть добавлены и подтверждены в my.tuna.am → Домены."
+    echo "  Адрес: https://$DOMAIN_INPUT/ — в my.tuna.am → Домены должны быть добавлены и подтверждены: $TUNA_HOSTS."
     echo "  Панель администратора: https://$DOMAIN_INPUT/_/   ·   журнал: journalctl -u beemes -f   ·   туннель: journalctl -u beemes-tuna -f"
   fi
   if [ -z "$ADMIN_EMAIL" ] && [ "$FRESH_INSTALL" = 1 ]; then
