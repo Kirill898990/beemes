@@ -32,6 +32,8 @@ const mailConfigured = (app) => !!app.settings().smtp.enabled
 
 /** Счётчик в памяти сервера: не больше max за окно ms. Превысили — ошибка с текстом msg. */
 function limit(app, key, max, ms, msg) {
+  // За посредником, который не сообщает адрес посетителя, все приходят с одного адреса — лимит «на адрес» общий на всех.
+  if ($os.getenv("BEHIND_PROXY") === "1" && /_ip:(127\.|::1$)/.test(key)) max *= 25
   const now = Date.now()
   let c = app.store().get(key)
   if (!c || now - c.t > ms) c = { t: now, n: 0 }

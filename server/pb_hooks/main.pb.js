@@ -391,6 +391,12 @@ routerUse((e) => {
   if (!path.startsWith("/api/") && !path.startsWith("/_/")) h.set("Cache-Control", "no-cache")
   const host = String(e.request.host || "")
   if (!/^(127\.|localhost|\[::1\]|10\.|192\.168\.)/.test(host)) h.set("Strict-Transport-Security", "max-age=31536000")
+  // www.beemes.ru ведёт на основной адрес (у Caddy это делает он сам, у туннеля — мы).
+  const site = String($os.getenv("SITE_URL") || "")
+  if (site && host.toLowerCase() === "www." + site.replace(/^https?:\/\//, "").toLowerCase()) {
+    const q = e.request.url.rawQuery
+    return e.redirect(308, site + path + (q ? "?" + q : ""))
+  }
   return e.next()
 })
 
@@ -399,6 +405,8 @@ routerUse((e) => {
 onBootstrap((e) => {
   e.next()
   // У Caddy это X-Forwarded-For, у туннеля Cloudflare (домашний сервер) — CF-Connecting-IP (PROXY_IP_HEADER в server.env).
+  // PROXY_IP_HEADER=auto (туннель Tuna) — сервер выясняет заголовок сам, см. bm_proxy_probe ниже.
+  if ($os.getenv("BEHIND_PROXY") === "1" && $os.getenv("PROXY_IP_HEADER") === "auto") return
   const want = $os.getenv("BEHIND_PROXY") === "1" ? [$os.getenv("PROXY_IP_HEADER") || "X-Forwarded-For"] : []
   const s = $app.settings()
   const have = Array.from(s.trustedProxy.headers || [])
@@ -407,4 +415,59 @@ onBootstrap((e) => {
     s.trustedProxy.useLeftmostIP = false
     $app.save(s)
   }
+})
+
+// ---------- Какой заголовок несёт настоящий адрес посетителя (PROXY_IP_HEADER=auto) ----------
+// Посредник (туннель) передаёт адрес посетителя в заголовке, но в каком — у каждого по-своему, а поверить не тому
+// заголовку значит дать любому подделать свой адрес. Поэтому сервер проверяет сам: обращается к себе через свой же
+// публичный адрес с заведомо ложными заголовками и смотрит, что дошло. Заголовку верим, только если посредник
+// заменил ложное значение настоящим. Если такого заголовка нет — не верим никакому (все посетители — один адрес).
+routerAdd("GET", "/api/bm/proxy-probe", (e) => {
+  const want = $app.store().get("bm_probe")
+  const got = String(e.request.url.query().get("n") || "")
+  if (!want || got.length < 32 || !$security.equal(got, String(want))) throw new NotFoundError("")
+  $app.store().remove("bm_probe")
+  return e.json(200, {
+    xff: e.request.header.get("X-Forwarded-For"),
+    xri: e.request.header.get("X-Real-IP"),
+    remote: String(e.request.remoteAddr || ""),
+  })
+})
+
+cronAdd("bm_proxy_probe", "* * * * *", () => {
+  if ($os.getenv("BEHIND_PROXY") !== "1" || $os.getenv("PROXY_IP_HEADER") !== "auto") return
+  const site = String($os.getenv("SITE_URL") || "")
+  if (!site || $app.store().get("bm_probe_done")) return
+  const FAKE_XFF = "203.0.113.7", FAKE_XRI = "203.0.113.8"
+  // Настоящий адрес из интернета: не ложный, не локальный и не из домашней сети.
+  const real = (v) => {
+    v = String(v || "").trim()
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(v)
+    if (!m) return /^[0-9a-f:]+$/i.test(v) && v.indexOf(":") > 0 && !/^(::1$|f[cde])/i.test(v)
+    const a = +m[1], b = +m[2]
+    if (m.slice(1).some((x) => +x > 255) || v === FAKE_XFF || v === FAKE_XRI) return false
+    return !(a === 0 || a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127))
+  }
+  const nonce = $security.randomString(40)
+  $app.store().set("bm_probe", nonce)
+  let seen = null
+  try {
+    const res = $http.send({
+      url: site + "/api/bm/proxy-probe?n=" + nonce, method: "GET", timeout: 20,
+      headers: { "X-Forwarded-For": FAKE_XFF, "X-Real-IP": FAKE_XRI },
+    })
+    if (res.statusCode === 200) seen = res.json
+  } catch (_) {}
+  $app.store().remove("bm_probe")
+  if (!seen) return // адрес ещё не открывается (домен не подключён) — попробуем через минуту
+  const lastXff = String(seen.xff || "").split(",").pop()
+  const want = real(seen.xri) ? ["X-Real-IP"] : real(lastXff) ? ["X-Forwarded-For"] : []
+  const s = $app.settings()
+  if (Array.from(s.trustedProxy.headers || []).join(",") !== want.join(",") || s.trustedProxy.useLeftmostIP) {
+    s.trustedProxy.headers = want
+    s.trustedProxy.useLeftmostIP = false
+    $app.save(s)
+  }
+  $app.store().set("bm_probe_done", true)
+  console.log("Адрес посетителя берём из заголовка: " + (want[0] || "нет подходящего — все посетители считаются одним адресом"))
 })

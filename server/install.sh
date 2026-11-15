@@ -18,12 +18,15 @@
 #
 # Повторный запуск обновляет сайт и миграции. База с перепиской (pb_data) не трогается.
 #
-# Домашний сервер без открытых портов (через туннель Cloudflare) — TUNNEL=1:
+# Домашний сервер без открытых портов (через туннель) — TUNNEL=tuna:
 #   curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main/server/install.sh \
-#     | sudo TUNNEL=1 bash -s -- beemes.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
+#     | sudo TUNNEL=tuna bash -s -- beemes.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
 # Caddy и свой сервер звонков тогда не ставятся (звонки соединяются напрямую), брандмауэр закрывает всё
-# входящее (SSH — только из домашней сети), посетители приходят через туннель Cloudflare. Установка спросит
-# токен туннеля (Cloudflare → Networking → Tunnels). Обновления сервер забирает с GitHub сам.
+# входящее (SSH — только из домашней сети), посетители приходят через туннель Tuna (tuna.am, серверы в России,
+# свой домен — на платном тарифе). Установка спросит ключ Tuna (my.tuna.am → API-ключи, право tunnels:connect).
+# Обновления сервер забирает с GitHub сам.
+# TUNNEL=cloudflare (или 1) — то же через туннель Cloudflare (бесплатно, но в России Cloudflare замедляют:
+# туннель с домашнего интернета может не подключиться, а сайт — не открываться у посетителей).
 
 set -euo pipefail
 
@@ -46,10 +49,18 @@ TURN_CONF="${TURN_CONF:-/etc/turnserver.conf}"
 # Дополнительные домены, на которых beemes тоже открывается (например, старый адрес при переезде):
 #   ALSO_DOMAINS="kbast.ru" bash -s -- beemes.ru …
 ALSO_DOMAINS="${ALSO_DOMAINS:-}"
-# Домашний сервер за туннелем Cloudflare (порты на роутере не нужны).
+# Домашний сервер за туннелем (порты на роутере не нужны): tuna — Tuna, cloudflare (или 1) — Cloudflare.
 TUNNEL="${TUNNEL:-0}"
+case "$TUNNEL" in
+  0|"") TUNNEL=0; HOMESRV=0 ;;
+  1|cloudflare) TUNNEL=cloudflare; HOMESRV=1 ;;
+  tuna) HOMESRV=1 ;;
+  *) printf 'Ошибка: TUNNEL может быть tuna или cloudflare\n' >&2; exit 1 ;;
+esac
 # Дома свой сервер для звонков не поднять (нужны открытые порты) — звонки соединяются напрямую.
-if [ "$TUNNEL" = 1 ]; then TURN="${TURN:-0}"; fi
+if [ "$HOMESRV" = 1 ]; then TURN="${TURN:-0}"; fi
+# Сколько раз (по 3 секунды) ждать, пока сайт откроется через туннель Tuna.
+TUNNEL_WAIT="${TUNNEL_WAIT:-40}"
 
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[1;31mОшибка: %s\033[0m\n' "$1" >&2; exit 1; }
@@ -64,7 +75,7 @@ fi
 # а для этого в нём должна быть поддержка работы за Caddy (файл pb_hooks/proxy.pb.js).
 SCHOOL_UNIT="$SYSTEMD_DIR/pocketbase.service"
 SCHOOL_DIRECT=0
-if [ "$TUNNEL" != 1 ] && [ -f "$SCHOOL_UNIT" ] && ! grep -q -- "--http 127.0.0.1:" "$SCHOOL_UNIT"; then
+if [ "$HOMESRV" != 1 ] && [ -f "$SCHOOL_UNIT" ] && ! grep -q -- "--http 127.0.0.1:" "$SCHOOL_UNIT"; then
   SCHOOL_DIRECT=1
   grep -rqs "BEHIND_PROXY" "$SCHOOL_DIR/pb_hooks" || fail "сначала обновите сайт школы (нужна версия с поддержкой Caddy), потом запустите эту установку ещё раз."
 fi
@@ -135,9 +146,14 @@ set_env() {
 }
 set_env SITE_URL "https://$DOMAIN"
 set_env BEHIND_PROXY 1
-# Настоящий адрес посетителя: у Cloudflare — заголовок CF-Connecting-IP, у Caddy — X-Forwarded-For.
-if [ "$TUNNEL" = 1 ]; then set_env PROXY_IP_HEADER "CF-Connecting-IP"; else set_env PROXY_IP_HEADER "X-Forwarded-For"; fi
-if [ "$TUNNEL" = 1 ] && [ "${TURN:-0}" = 0 ]; then
+# Настоящий адрес посетителя: у Cloudflare — заголовок CF-Connecting-IP, у Caddy — X-Forwarded-For,
+# у Tuna сервер выясняет заголовок сам (auto, см. pb_hooks/main.pb.js).
+case "$TUNNEL" in
+  cloudflare) set_env PROXY_IP_HEADER "CF-Connecting-IP" ;;
+  tuna) set_env PROXY_IP_HEADER "auto" ;;
+  *) set_env PROXY_IP_HEADER "X-Forwarded-For" ;;
+esac
+if [ "$HOMESRV" = 1 ] && [ "${TURN:-0}" = 0 ]; then
   # Без своего сервера звонков — звонки соединяются напрямую (STUN).
   { grep -v -e '^TURN_HOST=' -e '^TURN_SECRET=' "$ENV_FILE" || true; } > "$ENV_FILE.tmp"
   mv "$ENV_FILE.tmp" "$ENV_FILE"
@@ -234,8 +250,8 @@ systemctl restart beemes
 sleep 3
 systemctl is-active --quiet beemes || fail "beemes не запустился. Подробности: journalctl -u beemes -n 50"
 
-# ---------- Домашний сервер: туннель Cloudflare вместо Caddy ----------
-if [ "$TUNNEL" = 1 ]; then
+# ---------- Домашний сервер: туннель вместо Caddy ----------
+if [ "$HOMESRV" = 1 ]; then
   say "Защищаю домашний сервер"
   # Брандмауэр: всё входящее закрыто, SSH — только из домашней сети. Посетители приходят через туннель (исходящее соединение).
   apt-get install -y -qq ufw >/dev/null
@@ -251,77 +267,192 @@ if [ "$TUNNEL" = 1 ]; then
   # Компьютер не засыпает (иначе мессенджер пропадёт, пока никто не трогает мышь).
   systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
 
-  say "Подключаю туннель Cloudflare"
-  if ! command -v cloudflared >/dev/null 2>&1; then
-    mkdir -p --mode=0755 /usr/share/keyrings
-    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
-    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" > /etc/apt/sources.list.d/cloudflared.list
-    apt-get update -qq
-    apt-get install -y -qq cloudflared >/dev/null || fail "не получилось установить cloudflared"
-  fi
-  # Новые версии cloudflared тоже ставятся сами: старые Cloudflare со временем перестаёт пускать.
-  printf 'Unattended-Upgrade::Origins-Pattern { "origin=cloudflared"; };\n' > /etc/apt/apt.conf.d/51beemes-cloudflared
-  CF_BIN="$(command -v cloudflared)"
-  CF_DIR="${CF_DIR:-/etc/cloudflared}"
-  CF_TOKEN_FILE="$CF_DIR/token"
-  CF_UNIT="$SYSTEMD_DIR/cloudflared.service"
-  # Служба туннеля есть, и файл с токеном, на который она ссылается, на месте.
-  cf_unit_ok() {
-    [ -f "$CF_UNIT" ] || return 1
-    local tf
-    tf="$(grep -o -- '--token-file [^ ]*' "$CF_UNIT" | head -n1 | awk '{print $2}')"
-    [ -z "$tf" ] || [ -s "$tf" ]
-  }
-  cf_ready() { systemctl is-enabled --quiet cloudflared 2>/dev/null && cf_unit_ok; }
-  CF_TOKEN="${CF_TOKEN:-}"
-  CF_NEW=0
-  if [ -z "$CF_TOKEN" ] && cf_ready; then
-    echo "  Туннель уже настроен."
+  if [ "$TUNNEL" = cloudflare ]; then
+    say "Подключаю туннель Cloudflare"
+    if ! command -v cloudflared >/dev/null 2>&1; then
+      mkdir -p --mode=0755 /usr/share/keyrings
+      curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
+      echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" > /etc/apt/sources.list.d/cloudflared.list
+      apt-get update -qq
+      apt-get install -y -qq cloudflared >/dev/null || fail "не получилось установить cloudflared"
+    fi
+    # Новые версии cloudflared тоже ставятся сами: старые Cloudflare со временем перестаёт пускать.
+    printf 'Unattended-Upgrade::Origins-Pattern { "origin=cloudflared"; };\n' > /etc/apt/apt.conf.d/51beemes-cloudflared
+    CF_BIN="$(command -v cloudflared)"
+    CF_DIR="${CF_DIR:-/etc/cloudflared}"
+    CF_TOKEN_FILE="$CF_DIR/token"
+    CF_UNIT="$SYSTEMD_DIR/cloudflared.service"
+    # Служба туннеля есть, и файл с токеном, на который она ссылается, на месте.
+    cf_unit_ok() {
+      [ -f "$CF_UNIT" ] || return 1
+      local tf
+      tf="$(grep -o -- '--token-file [^ ]*' "$CF_UNIT" | head -n1 | awk '{print $2}')"
+      [ -z "$tf" ] || [ -s "$tf" ]
+    }
+    cf_ready() { systemctl is-enabled --quiet cloudflared 2>/dev/null && cf_unit_ok; }
+    CF_TOKEN="${CF_TOKEN:-}"
+    CF_NEW=0
+    if [ -z "$CF_TOKEN" ] && cf_ready; then
+      echo "  Туннель уже настроен."
+    else
+      # Спрашиваем, только если есть живой терминал (у автообновления его нет).
+      if [ -z "$CF_TOKEN" ] && { : > /dev/tty; } 2>/dev/null; then
+        printf '  Вставьте токен туннеля Cloudflare (на экране его не видно) и нажмите Enter:\n  ' > /dev/tty
+        read -rs CF_TOKEN < /dev/tty || true
+        echo > /dev/tty
+      fi
+      # Вставили всю команду «cloudflared service install …» — берём из неё только токен (последнее слово).
+      CF_TOKEN="$(printf '%s' "$CF_TOKEN" | tr -s ' \t\r\n' ' ' | awk '{print $NF}')"
+      if [ -z "$CF_TOKEN" ]; then
+        echo "  Токен не введён — туннель не подключён. Запустите установку ещё раз, когда будет токен."
+      elif ! [[ "$CF_TOKEN" =~ ^eyJ[A-Za-z0-9+/=_-]{20,}$ ]]; then
+        echo "  Это не похоже на токен туннеля: он начинается с eyJ и написан одной длинной строкой."
+        echo "  Скопируйте строку «sudo cloudflared service install eyJ…» со страницы туннеля и запустите установку ещё раз."
+      else
+        # Своя служба вместо «cloudflared service install»: та ждёт подключения всего 15 секунд, а из России оно бывает
+        # дольше — тогда установка считается неудачной и токен стирается.
+        mkdir -p "$CF_DIR"
+        ( umask 077; printf '%s' "$CF_TOKEN" > "$CF_TOKEN_FILE" )
+        chmod 600 "$CF_TOKEN_FILE"
+        systemctl disable --now cloudflared-update.timer >/dev/null 2>&1 || true
+        rm -f "$SYSTEMD_DIR/cloudflared-update.timer" "$SYSTEMD_DIR/cloudflared-update.service"
+        printf '%s\n' '[Unit]' 'Description=Туннель Cloudflare' 'After=network-online.target' 'Wants=network-online.target' '' \
+          '[Service]' 'Type=notify' "ExecStart=$CF_BIN --no-autoupdate tunnel run --token-file $CF_TOKEN_FILE" '' \
+          '[Install]' 'WantedBy=multi-user.target' > "$CF_UNIT"
+        CF_NEW=1
+      fi
+    fi
+    unset CF_TOKEN
+    if cf_unit_ok; then
+      # Подключение из России бывает долгим, а при обрыве туннель должен подниматься сам — и так всегда.
+      mkdir -p "$CF_UNIT.d"
+      printf '%s\n' '[Service]' 'TimeoutStartSec=5min' 'Restart=always' 'RestartSec=10s' > "$CF_UNIT.d/10-beemes.conf"
+      systemctl daemon-reload
+      systemctl enable cloudflared >/dev/null 2>&1 || true
+      if [ "$CF_NEW" = 1 ] || ! systemctl is-active --quiet cloudflared; then systemctl restart --no-block cloudflared; fi
+      printf '  Жду подключения туннеля'
+      for _ in $(seq 1 60); do systemctl is-active --quiet cloudflared && break; printf '.'; sleep 2; done
+      echo
+      if systemctl is-active --quiet cloudflared; then
+        echo "  Туннель подключён."
+      else
+        printf '\033[1;33m  Туннель пока не подключился, но будет пробовать сам. Проверить: systemctl status cloudflared\033[0m\n'
+        echo "  Последние строки журнала туннеля:"
+        journalctl -u cloudflared -n 12 --no-pager -o cat 2>/dev/null | sed 's/^/    /' || true
+      fi
+    fi
   else
-    # Спрашиваем, только если есть живой терминал (у автообновления его нет).
-    if [ -z "$CF_TOKEN" ] && { : > /dev/tty; } 2>/dev/null; then
-      printf '  Вставьте токен туннеля Cloudflare (на экране его не видно) и нажмите Enter:\n  ' > /dev/tty
-      read -rs CF_TOKEN < /dev/tty || true
+    say "Подключаю туннель Tuna"
+    # Туннель Cloudflare от прошлой установки больше не нужен.
+    if [ -f "$SYSTEMD_DIR/cloudflared.service" ] || command -v cloudflared >/dev/null 2>&1; then
+      systemctl disable --now cloudflared cloudflared-update.timer >/dev/null 2>&1 || true
+      rm -rf "$SYSTEMD_DIR/cloudflared.service" "$SYSTEMD_DIR/cloudflared.service.d" \
+        "$SYSTEMD_DIR/cloudflared-update.service" "$SYSTEMD_DIR/cloudflared-update.timer" \
+        "${CF_DIR:-/etc/cloudflared}/token" /etc/apt/apt.conf.d/51beemes-cloudflared
+      apt-get remove -y -qq cloudflared >/dev/null 2>&1 || true
+      rm -f /etc/apt/sources.list.d/cloudflared.list
+      echo "  Туннель Cloudflare отключён и удалён."
+    fi
+    if ! command -v tuna >/dev/null 2>&1; then
+      TUNA_REPO="https://code.tuna.am/api/packages/tuna/debian"
+      mkdir -p --mode=0755 /usr/share/keyrings
+      curl -fsSL "$TUNA_REPO/repository.key" -o /usr/share/keyrings/tuna-forgejo.asc || true
+      echo "deb [signed-by=/usr/share/keyrings/tuna-forgejo.asc] $TUNA_REPO stable main" > /etc/apt/sources.list.d/tuna-forgejo.list
+      apt-get update -qq >/dev/null 2>&1 || true
+      apt-get install -y -qq tuna-cli >/dev/null 2>&1 || true
+      if ! command -v tuna >/dev/null 2>&1; then
+        # Не вышло через apt (новые системы бывают строже к чужим репозиториям) — ставим тот же пакет напрямую,
+        # сверяя контрольную сумму со списком пакетов Tuna.
+        rm -f /etc/apt/sources.list.d/tuna-forgejo.list
+        TUNA_PKG="$(curl -fsSL "$TUNA_REPO/dists/stable/main/binary-$(dpkg --print-architecture)/Packages" | awk -v RS= '
+          /(^|\n)Package: tuna-cli(\n|$)/ { v = f = h = ""; n = split($0, L, "\n")
+            for (i = 1; i <= n; i++) { if (L[i] ~ /^Version: /) v = substr(L[i], 10); if (L[i] ~ /^Filename: /) f = substr(L[i], 11); if (L[i] ~ /^SHA256: /) h = substr(L[i], 9) }
+            if (v != "" && f != "" && h != "") print v, f, h }' | sort -V | tail -n1 || true)"
+        TUNA_FILE="$(printf '%s' "$TUNA_PKG" | awk '{print $2}')"
+        TUNA_SUM="$(printf '%s' "$TUNA_PKG" | awk '{print $3}')"
+        [ -n "$TUNA_FILE" ] && [ -n "$TUNA_SUM" ] || fail "не получилось найти пакет программы Tuna (tuna-cli)"
+        TUNA_DEB="$(mktemp --suffix=.deb)"
+        curl -fsSL "$TUNA_REPO/$TUNA_FILE" -o "$TUNA_DEB" || fail "не получилось скачать программу Tuna"
+        echo "$TUNA_SUM  $TUNA_DEB" | sha256sum -c --status - || fail "пакет программы Tuna повреждён (не сошлась контрольная сумма)"
+        dpkg -i "$TUNA_DEB" >/dev/null || fail "не получилось установить программу Tuna (tuna-cli)"
+        rm -f "$TUNA_DEB"
+      fi
+    fi
+    # Новые версии программы Tuna ставятся вместе с обновлениями безопасности.
+    printf 'Unattended-Upgrade::Origins-Pattern { "origin=Tuna Code"; };\n' > /etc/apt/apt.conf.d/51beemes-tuna
+    TUNA_BIN="$(command -v tuna)"
+    TUNA_ENV="$DIR/tuna.env"
+    TUNA_KEY="${TUNA_API_KEY:-}"
+    TUNA_NEW=0
+    TUNA_BAD=0
+    # Спрашиваем ключ, только если его ещё нет и есть живой терминал (у автообновления его нет).
+    if [ -z "$TUNA_KEY" ] && [ ! -s "$TUNA_ENV" ] && { : > /dev/tty; } 2>/dev/null; then
+      printf '  Вставьте ключ Tuna (my.tuna.am → API-ключи; на экране его не видно) и нажмите Enter:\n  ' > /dev/tty
+      read -rs TUNA_KEY < /dev/tty || true
       echo > /dev/tty
     fi
-    # Вставили всю команду «cloudflared service install …» — берём из неё только токен (последнее слово).
-    CF_TOKEN="$(printf '%s' "$CF_TOKEN" | tr -s ' \t\r\n' ' ' | awk '{print $NF}')"
-    if [ -z "$CF_TOKEN" ]; then
-      echo "  Токен не введён — туннель не подключён. Запустите установку ещё раз, когда будет токен."
-    elif ! [[ "$CF_TOKEN" =~ ^eyJ[A-Za-z0-9+/=_-]{20,}$ ]]; then
-      echo "  Это не похоже на токен туннеля: он начинается с eyJ и написан одной длинной строкой."
-      echo "  Скопируйте строку «sudo cloudflared service install eyJ…» со страницы туннеля и запустите установку ещё раз."
-    else
-      # Своя служба вместо «cloudflared service install»: та ждёт подключения всего 15 секунд, а из России оно бывает
-      # дольше — тогда установка считается неудачной и токен стирается.
-      mkdir -p "$CF_DIR"
-      ( umask 077; printf '%s' "$CF_TOKEN" > "$CF_TOKEN_FILE" )
-      chmod 600 "$CF_TOKEN_FILE"
-      systemctl disable --now cloudflared-update.timer >/dev/null 2>&1 || true
-      rm -f "$SYSTEMD_DIR/cloudflared-update.timer" "$SYSTEMD_DIR/cloudflared-update.service"
-      printf '%s\n' '[Unit]' 'Description=Туннель Cloudflare' 'After=network-online.target' 'Wants=network-online.target' '' \
-        '[Service]' 'Type=notify' "ExecStart=$CF_BIN --no-autoupdate tunnel run --token-file $CF_TOKEN_FILE" '' \
-        '[Install]' 'WantedBy=multi-user.target' > "$CF_UNIT"
-      CF_NEW=1
+    TUNA_KEY="$(printf '%s' "$TUNA_KEY" | tr -s ' \t\r\n' ' ' | awk '{print $NF}')"
+    if [ -n "$TUNA_KEY" ]; then
+      if [[ "$TUNA_KEY" =~ ^[A-Za-z0-9._~+/=-]{16,}$ ]]; then
+        # Ключ лежит в файле, который видит только root; программе Tuna его передаёт systemd.
+        ( umask 077; printf 'TUNA_API_KEY=%s\n' "$TUNA_KEY" > "$TUNA_ENV" )
+        chmod 600 "$TUNA_ENV"
+        TUNA_NEW=1
+      else
+        TUNA_BAD=1
+        echo "  Это не похоже на ключ Tuna: он написан одной строкой без пробелов. Скопируйте его ещё раз со страницы"
+        echo "  my.tuna.am → API-ключи и запустите установку снова."
+      fi
     fi
-  fi
-  unset CF_TOKEN
-  if cf_unit_ok; then
-    # Подключение из России бывает долгим, а при обрыве туннель должен подниматься сам — и так всегда.
-    mkdir -p "$CF_UNIT.d"
-    printf '%s\n' '[Service]' 'TimeoutStartSec=5min' 'Restart=always' 'RestartSec=10s' > "$CF_UNIT.d/10-beemes.conf"
-    systemctl daemon-reload
-    systemctl enable cloudflared >/dev/null 2>&1 || true
-    if [ "$CF_NEW" = 1 ] || ! systemctl is-active --quiet cloudflared; then systemctl restart --no-block cloudflared; fi
-    printf '  Жду подключения туннеля'
-    for _ in $(seq 1 60); do systemctl is-active --quiet cloudflared && break; printf '.'; sleep 2; done
-    echo
-    if systemctl is-active --quiet cloudflared; then
-      echo "  Туннель подключён."
-    else
-      printf '\033[1;33m  Туннель пока не подключился, но будет пробовать сам. Проверить: systemctl status cloudflared\033[0m\n'
-      echo "  Последние строки журнала туннеля:"
-      journalctl -u cloudflared -n 12 --no-pager -o cat 2>/dev/null | sed 's/^/    /' || true
+    unset TUNA_KEY
+    # Адреса: основной и www (www ведёт на основной). WWW=0 — без www.
+    TUNA_HOSTS="$DOMAIN"
+    if [ "${WWW:-1}" != 0 ] && [ "$(printf '%s' "$DOMAIN" | tr -cd '.' | wc -c)" = 1 ]; then TUNA_HOSTS="$DOMAIN www.$DOMAIN"; fi
+    TUNA_UNITS=""
+    if [ -s "$TUNA_ENV" ]; then
+      for H in $TUNA_HOSTS; do
+        U="beemes-tuna"; [ "$H" = "$DOMAIN" ] || U="beemes-tuna-www"
+        TUNA_UNITS="$TUNA_UNITS $U"
+        # Программа Tuna работает под отдельным пользователем без прав: ей нужен только выход в интернет и доступ
+        # к beemes на этом же компьютере.
+        printf '%s\n' '[Unit]' "Description=Туннель Tuna: $H" 'After=network-online.target beemes.service' 'Wants=network-online.target' '' \
+          '[Service]' "EnvironmentFile=$TUNA_ENV" "Environment=HOME=/var/lib/$U" \
+          "ExecStart=$TUNA_BIN http $PORT --domain=$H --inspect=false" \
+          'Restart=always' 'RestartSec=15' 'DynamicUser=yes' "StateDirectory=$U" 'NoNewPrivileges=yes' 'ProtectHome=yes' \
+          'PrivateDevices=yes' 'ProtectKernelTunables=yes' 'ProtectControlGroups=yes' '' \
+          '[Install]' 'WantedBy=multi-user.target' > "$SYSTEMD_DIR/$U.service.new"
+        if ! cmp -s "$SYSTEMD_DIR/$U.service.new" "$SYSTEMD_DIR/$U.service" 2>/dev/null; then TUNA_NEW=1; fi
+        mv "$SYSTEMD_DIR/$U.service.new" "$SYSTEMD_DIR/$U.service"
+      done
+      systemctl daemon-reload
+      for U in $TUNA_UNITS; do
+        systemctl enable "$U" >/dev/null 2>&1 || true
+        if [ "$TUNA_NEW" = 1 ] || ! systemctl is-active --quiet "$U"; then systemctl restart --no-block "$U"; fi
+      done
+      # Служба для www осталась от прошлой установки, а www больше не нужен — убираем.
+      case " $TUNA_UNITS " in *" beemes-tuna-www "*) ;; *)
+        if [ -f "$SYSTEMD_DIR/beemes-tuna-www.service" ]; then
+          systemctl disable --now beemes-tuna-www >/dev/null 2>&1 || true
+          rm -f "$SYSTEMD_DIR/beemes-tuna-www.service"
+          systemctl daemon-reload
+        fi ;;
+      esac
+      printf '  Жду, когда https://%s откроется через Tuna' "$DOMAIN_INPUT"
+      TUNA_OK=0
+      for _ in $(seq 1 "$TUNNEL_WAIT"); do
+        if curl -fsS -m 8 "https://$DOMAIN/api/health" 2>/dev/null | grep -q 'API is healthy'; then TUNA_OK=1; break; fi
+        printf '.'; sleep 3
+      done
+      echo
+      if [ "$TUNA_OK" = 1 ]; then
+        echo "  Готово: https://$DOMAIN_INPUT открывается через Tuna."
+      else
+        printf '\033[1;33m  Пока не открывается. Туннель будет пробовать сам; чаще всего Tuna ещё проверяет домен (до 2 часов).\033[0m\n'
+        echo "  Проверьте в кабинете my.tuna.am → Домены, что $DOMAIN подтверждён. Последние строки журнала туннеля:"
+        journalctl -u beemes-tuna -n 12 --no-pager -o cat 2>/dev/null | sed 's/^/    /' || true
+      fi
+    elif [ "$TUNA_BAD" = 0 ]; then
+      echo "  Ключ не введён — туннель не подключён. Запустите установку ещё раз, когда будет ключ."
     fi
   fi
 
@@ -333,7 +464,7 @@ if [ "$TUNNEL" = 1 ]; then
     echo "SHA=\"\$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/$REPO/commits/$BRANCH)\""
     echo '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 0'
     echo "[ \"\$(cat $DIR/.ref 2>/dev/null || true)\" = \"\$SHA\" ] && exit 0"
-    echo "curl -fsSL \"https://raw.githubusercontent.com/$REPO/\$SHA/server/install.sh\" | REF=\"\$SHA\" TUNNEL=1 bash -s -- $DOMAIN"
+    echo "curl -fsSL \"https://raw.githubusercontent.com/$REPO/\$SHA/server/install.sh\" | REF=\"\$SHA\" TUNNEL=$TUNNEL bash -s -- $DOMAIN"
   } > /usr/local/sbin/beemes-autoupdate
   chmod 755 /usr/local/sbin/beemes-autoupdate
   printf '%s\n' '[Unit]' 'Description=Автообновление beemes с GitHub' 'After=network-online.target' 'Wants=network-online.target' '' \
@@ -351,9 +482,14 @@ if [ "$TUNNEL" = 1 ]; then
 
   say "Готово! beemes работает на этом компьютере и будет запускаться сам."
   if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/health"; then echo "  Проверка: beemes отвечает (http://127.0.0.1:$PORT)."; else echo "  beemes пока не отвечает: journalctl -u beemes -n 50"; fi
-  echo "  Чтобы beemes открывался по адресу https://$DOMAIN_INPUT/ — в Cloudflare: Networking → Tunnels → ваш туннель →"
-  echo "  Routes → Add route → Published application: $DOMAIN и www.$DOMAIN → Service URL: http://localhost:$PORT"
-  echo "  Панель администратора: https://$DOMAIN_INPUT/_/   ·   журнал: journalctl -u beemes -f   ·   туннель: systemctl status cloudflared"
+  if [ "$TUNNEL" = cloudflare ]; then
+    echo "  Чтобы beemes открывался по адресу https://$DOMAIN_INPUT/ — в Cloudflare: Networking → Tunnels → ваш туннель →"
+    echo "  Routes → Add route → Published application: $DOMAIN и www.$DOMAIN → Service URL: http://localhost:$PORT"
+    echo "  Панель администратора: https://$DOMAIN_INPUT/_/   ·   журнал: journalctl -u beemes -f   ·   туннель: systemctl status cloudflared"
+  else
+    echo "  Адрес: https://$DOMAIN_INPUT/ — домены $TUNA_HOSTS должны быть добавлены и подтверждены в my.tuna.am → Домены."
+    echo "  Панель администратора: https://$DOMAIN_INPUT/_/   ·   журнал: journalctl -u beemes -f   ·   туннель: journalctl -u beemes-tuna -f"
+  fi
   if [ -z "$ADMIN_EMAIL" ] && [ "$FRESH_INSTALL" = 1 ]; then
     echo "  Администратора создайте командой: $DIR/pocketbase superuser upsert ПОЧТА ПАРОЛЬ --dir $DIR/pb_data"
   fi

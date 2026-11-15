@@ -85,7 +85,8 @@ routerAdd("POST", "/api/bm/qr/start", (e) => {
   const ipKey = "qr_ip:" + e.realIP()
   const n = (e.app.store().get(ipKey) || { n: 0, t: Date.now() })
   if (Date.now() - n.t > 60000) { n.n = 0; n.t = Date.now() }
-  if (++n.n > 20) throw new TooManyRequestsError("Слишком часто")
+  const shared = $os.getenv("BEHIND_PROXY") === "1" && /_ip:(127\.|::1$)/.test(ipKey) // адрес посетителя неизвестен
+  if (++n.n > (shared ? 500 : 20)) throw new TooManyRequestsError("Слишком часто")
   e.app.store().set(ipKey, n)
   const id = S.randomId(20)
   const secret = S.randomId(32)
