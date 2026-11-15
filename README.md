@@ -49,6 +49,34 @@ curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main
 
 Повторный запуск той же команды обновляет beemes. Журналы: `journalctl -u beemes -f`, `journalctl -u caddy -f`.
 
+### Домашний сервер без открытых портов (через Cloudflare)
+
+beemes может работать на своём компьютере дома, даже если порты на роутере открыть нельзя: компьютер сам подключается
+к Cloudflare (туннель), а пользователи приходят через Cloudflare. Домашний IP нигде не виден, снаружи к компьютеру не
+подключиться. Ограничения: свой сервер для звонков дома не поднять — звонки соединяются напрямую (в мобильном интернете
+иногда не соединятся); у части российских провайдеров сайты за Cloudflare бывают медленнее.
+
+1. **Домен в Cloudflare.** [dash.cloudflare.com](https://dash.cloudflare.com) → **Add a domain** → `beemes.ru` → тариф
+   **Free**. Записи `beemes.ru` и `www`, которые ведут на старый сервер, удалите (их заменит туннель). Cloudflare покажет
+   два сервера имён (NS) — впишите их у регистратора домена вместо прежних и дождитесь письма, что домен активен.
+2. **Туннель.** **Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared**, имя `home`. Скопируйте показанную
+   команду `cloudflared service install …` (в ней токен, никому его не пересылайте).
+3. **Установка дома** (Ubuntu), почта и пароль — для панели администратора:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main/server/install.sh \
+     | sudo TUNNEL=1 bash -s -- beemes.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
+   ```
+   Установка спросит токен — вставьте скопированную команду целиком (на экране её не видно). Она закрывает все входящие
+   соединения (SSH — только из домашней сети), включает автоматические обновления безопасности, запрещает компьютеру
+   засыпать и раз в 15 минут сама забирает новое с GitHub. Повторный запуск той же команды тоже обновляет beemes.
+4. **Адрес.** В туннеле **Public Hostname → Add**: `beemes.ru` и `www.beemes.ru` → Service **HTTP**, `localhost:8091`.
+5. **Защита панели администратора.** **Zero Trust → Access → Applications → Add → Self-hosted**: домен `beemes.ru`,
+   путь `_/*`, правило **Allow → Emails →** ваша почта. Панель `/_/` откроется только после кода с вашей почты.
+6. **Настройки в панели** `https://beemes.ru/_/`: ключ Firebase (`bm_settings`, см. ниже) и почта (Settings → Mail settings).
+
+Не включайте в Cloudflare **Bot Fight Mode** и режим «Under Attack» — они мешают приложению ходить на сервер. Не
+создавайте у домена A-записей с домашним IP — тогда он станет виден. В BIOS включите автозапуск после отключения света.
+
 ### Push-уведомления (Firebase)
 
 1. [console.firebase.google.com](https://console.firebase.google.com) → создать проект → добавить

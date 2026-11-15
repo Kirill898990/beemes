@@ -398,7 +398,8 @@ routerUse((e) => {
 // по нему работают лимиты запросов. Без Caddy заголовку верить нельзя (его может подделать любой), поэтому выключаем.
 onBootstrap((e) => {
   e.next()
-  const want = $os.getenv("BEHIND_PROXY") === "1" ? ["X-Forwarded-For"] : []
+  // У Caddy это X-Forwarded-For, у туннеля Cloudflare (домашний сервер) — CF-Connecting-IP (PROXY_IP_HEADER в server.env).
+  const want = $os.getenv("BEHIND_PROXY") === "1" ? [$os.getenv("PROXY_IP_HEADER") || "X-Forwarded-For"] : []
   const s = $app.settings()
   const have = Array.from(s.trustedProxy.headers || [])
   if (have.join(",") !== want.join(",")) {

@@ -17,6 +17,13 @@
 #   5. создаёт администратора (если указаны почта и пароль).
 #
 # Повторный запуск обновляет сайт и миграции. База с перепиской (pb_data) не трогается.
+#
+# Домашний сервер без открытых портов (через туннель Cloudflare) — TUNNEL=1:
+#   curl -fsSL https://raw.githubusercontent.com/Kirill898990/beemes/refs/heads/main/server/install.sh \
+#     | sudo TUNNEL=1 bash -s -- beemes.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
+# Caddy и свой сервер звонков тогда не ставятся (звонки соединяются напрямую), брандмауэр закрывает всё
+# входящее (SSH — только из домашней сети), посетители приходят через туннель Cloudflare. Установка спросит
+# токен туннеля (Cloudflare → Zero Trust → Networks → Tunnels). Обновления сервер забирает с GitHub сам.
 
 set -euo pipefail
 
@@ -39,6 +46,10 @@ TURN_CONF="${TURN_CONF:-/etc/turnserver.conf}"
 # Дополнительные домены, на которых beemes тоже открывается (например, старый адрес при переезде):
 #   ALSO_DOMAINS="kbast.ru" bash -s -- beemes.ru …
 ALSO_DOMAINS="${ALSO_DOMAINS:-}"
+# Домашний сервер за туннелем Cloudflare (порты на роутере не нужны).
+TUNNEL="${TUNNEL:-0}"
+# Дома свой сервер для звонков не поднять (нужны открытые порты) — звонки соединяются напрямую.
+if [ "$TUNNEL" = 1 ]; then TURN="${TURN:-0}"; fi
 
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[1;31mОшибка: %s\033[0m\n' "$1" >&2; exit 1; }
@@ -53,7 +64,7 @@ fi
 # а для этого в нём должна быть поддержка работы за Caddy (файл pb_hooks/proxy.pb.js).
 SCHOOL_UNIT="$SYSTEMD_DIR/pocketbase.service"
 SCHOOL_DIRECT=0
-if [ -f "$SCHOOL_UNIT" ] && ! grep -q -- "--http 127.0.0.1:" "$SCHOOL_UNIT"; then
+if [ "$TUNNEL" != 1 ] && [ -f "$SCHOOL_UNIT" ] && ! grep -q -- "--http 127.0.0.1:" "$SCHOOL_UNIT"; then
   SCHOOL_DIRECT=1
   grep -rqs "BEHIND_PROXY" "$SCHOOL_DIR/pb_hooks" || fail "сначала обновите сайт школы (нужна версия с поддержкой Caddy), потом запустите эту установку ещё раз."
 fi
@@ -124,6 +135,14 @@ set_env() {
 }
 set_env SITE_URL "https://$DOMAIN"
 set_env BEHIND_PROXY 1
+# Настоящий адрес посетителя: у Cloudflare — заголовок CF-Connecting-IP, у Caddy — X-Forwarded-For.
+if [ "$TUNNEL" = 1 ]; then set_env PROXY_IP_HEADER "CF-Connecting-IP"; else set_env PROXY_IP_HEADER "X-Forwarded-For"; fi
+if [ "$TUNNEL" = 1 ] && [ "${TURN:-0}" = 0 ]; then
+  # Без своего сервера звонков — звонки соединяются напрямую (STUN).
+  { grep -v -e '^TURN_HOST=' -e '^TURN_SECRET=' "$ENV_FILE" || true; } > "$ENV_FILE.tmp"
+  mv "$ENV_FILE.tmp" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+fi
 
 UFW_ON=0
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then UFW_ON=1; fi
@@ -214,6 +233,86 @@ systemctl enable beemes >/dev/null 2>&1
 systemctl restart beemes
 sleep 3
 systemctl is-active --quiet beemes || fail "beemes не запустился. Подробности: journalctl -u beemes -n 50"
+
+# ---------- Домашний сервер: туннель Cloudflare вместо Caddy ----------
+if [ "$TUNNEL" = 1 ]; then
+  say "Защищаю домашний сервер"
+  # Брандмауэр: всё входящее закрыто, SSH — только из домашней сети. Посетители приходят через туннель (исходящее соединение).
+  apt-get install -y -qq ufw >/dev/null
+  ufw default deny incoming >/dev/null
+  ufw default allow outgoing >/dev/null
+  for NET in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do ufw allow from "$NET" to any port 22 proto tcp >/dev/null; done
+  ufw --force enable >/dev/null
+  # Защита SSH от подбора пароля.
+  apt-get install -y -qq fail2ban >/dev/null 2>&1 && systemctl enable --now fail2ban >/dev/null 2>&1 || true
+  # Обновления безопасности ставятся сами.
+  apt-get install -y -qq unattended-upgrades >/dev/null
+  printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > /etc/apt/apt.conf.d/20auto-upgrades
+  # Компьютер не засыпает (иначе мессенджер пропадёт, пока никто не трогает мышь).
+  systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+
+  say "Подключаю туннель Cloudflare"
+  if ! command -v cloudflared >/dev/null 2>&1; then
+    mkdir -p --mode=0755 /usr/share/keyrings
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" > /etc/apt/sources.list.d/cloudflared.list
+    apt-get update -qq
+    apt-get install -y -qq cloudflared >/dev/null || fail "не получилось установить cloudflared"
+  fi
+  if systemctl is-enabled --quiet cloudflared 2>/dev/null; then
+    echo "  Туннель уже подключён."
+  else
+    CF_TOKEN="${CF_TOKEN:-}"
+    if [ -z "$CF_TOKEN" ] && [ -r /dev/tty ]; then
+      printf '  Вставьте токен туннеля Cloudflare (на экране его не видно) и нажмите Enter:\n  ' > /dev/tty
+      read -rs CF_TOKEN < /dev/tty || true
+      echo > /dev/tty
+    fi
+    # Вставили всю команду «cloudflared service install …» — берём из неё только токен (последнее слово).
+    CF_TOKEN="$(printf '%s' "$CF_TOKEN" | tr -s ' \t\r\n' ' ' | awk '{print $NF}')"
+    if [ -n "$CF_TOKEN" ]; then
+      cloudflared service install "$CF_TOKEN" >/dev/null 2>&1 || fail "туннель не подключился — проверьте токен (Cloudflare → Zero Trust → Networks → Tunnels)"
+      echo "  Туннель подключён."
+    else
+      echo "  Токен не введён — туннель не подключён. Запустите установку ещё раз, когда будет токен."
+    fi
+  fi
+
+  # Автообновление: сервер сам раз в 15 минут смотрит на GitHub и ставит новое (входящие соединения не нужны).
+  {
+    echo '#!/usr/bin/env bash'
+    echo '# Автообновление beemes с GitHub (создано server/install.sh).'
+    echo 'set -euo pipefail'
+    echo "SHA=\"\$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/$REPO/commits/$BRANCH)\""
+    echo '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 0'
+    echo "[ \"\$(cat $DIR/.ref 2>/dev/null || true)\" = \"\$SHA\" ] && exit 0"
+    echo "curl -fsSL \"https://raw.githubusercontent.com/$REPO/\$SHA/server/install.sh\" | REF=\"\$SHA\" TUNNEL=1 bash -s -- $DOMAIN"
+  } > /usr/local/sbin/beemes-autoupdate
+  chmod 755 /usr/local/sbin/beemes-autoupdate
+  printf '%s\n' '[Unit]' 'Description=Автообновление beemes с GitHub' 'After=network-online.target' 'Wants=network-online.target' '' \
+    '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/sbin/beemes-autoupdate' > "$SYSTEMD_DIR/beemes-autoupdate.service"
+  printf '%s\n' '[Unit]' 'Description=Раз в 15 минут — проверить обновления beemes' '' \
+    '[Timer]' 'OnBootSec=5min' 'OnUnitActiveSec=15min' '' '[Install]' 'WantedBy=timers.target' > "$SYSTEMD_DIR/beemes-autoupdate.timer"
+  # Какая версия стоит (по ней автообновление понимает, есть ли новое).
+  if [ -z "$REF" ]; then
+    REF="$(curl -fsSL -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$REPO/commits/$BRANCH" 2>/dev/null || true)"
+    [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || REF=""
+  fi
+  if [ -n "$REF" ]; then echo "$REF" > "$DIR/.ref"; fi
+  systemctl daemon-reload
+  systemctl enable --now beemes-autoupdate.timer >/dev/null 2>&1 || true
+
+  say "Готово! beemes работает на этом компьютере и будет запускаться сам."
+  if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/health"; then echo "  Проверка: beemes отвечает (http://127.0.0.1:$PORT)."; else echo "  beemes пока не отвечает: journalctl -u beemes -n 50"; fi
+  echo "  Чтобы beemes открывался по адресу https://$DOMAIN_INPUT/ — в Cloudflare: Zero Trust → Networks → Tunnels →"
+  echo "  ваш туннель → Public Hostname → добавить $DOMAIN и www.$DOMAIN → Service: HTTP, localhost:$PORT."
+  echo "  Панель администратора: https://$DOMAIN_INPUT/_/   ·   журнал: journalctl -u beemes -f   ·   туннель: systemctl status cloudflared"
+  if [ -z "$ADMIN_EMAIL" ] && [ "$FRESH_INSTALL" = 1 ]; then
+    echo "  Администратора создайте командой: $DIR/pocketbase superuser upsert ПОЧТА ПАРОЛЬ --dir $DIR/pb_data"
+  fi
+  echo "  Уведомления: в панели администратора откройте bm_settings и вставьте ключ сервисного аккаунта Firebase."
+  exit 0
+fi
 
 # ---------- Caddy: https для всех сайтов на этом сервере ----------
 say "Настраиваю Caddy (https)"
