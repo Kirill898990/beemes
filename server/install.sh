@@ -25,6 +25,10 @@
 # входящее (SSH — только из домашней сети), посетители приходят через туннель Tuna (tuna.am, серверы в России,
 # свой домен — на платном тарифе). Установка спросит ключ Tuna (my.tuna.am → API-ключи, право tunnels:connect).
 # Обновления сервер забирает с GitHub сам.
+# Дополнительно для домашнего сервера (запоминаются, при повторном запуске указывать не нужно; off — отменить):
+#   TIMEZONE=Europe/Moscow      — часовой пояс компьютера;
+#   NIGHT=22:00-06:00           — каждый день выключаться в 22:00 и самому включаться в 06:00;
+#   BACKUP_DIR=/mnt/backup/beemes — каждый день класть копию базы и файлов в эту папку (на другом диске).
 # TUNNEL=cloudflare (или 1) — то же через туннель Cloudflare (бесплатно, но в России Cloudflare замедляют:
 # туннель с домашнего интернета может не подключиться, а сайт — не открываться у посетителей).
 
@@ -44,6 +48,7 @@ SCHOOL_DIR="${SCHOOL_DIR:-/opt/pocketbase}"
 SCHOOL_REPO="${SCHOOL_REPO:-Kirill898990/Python}"
 SCHOOL_INSTALL_URL="${SCHOOL_INSTALL_URL:-https://raw.githubusercontent.com/${SCHOOL_REPO}/refs/heads/main/server/install.sh}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+SBIN_DIR="${SBIN_DIR:-/usr/local/sbin}"
 CADDY_DIR="${CADDY_DIR:-/etc/caddy}"
 TURN_CONF="${TURN_CONF:-/etc/turnserver.conf}"
 # Дополнительные домены, на которых beemes тоже открывается (например, старый адрес при переезде):
@@ -465,10 +470,10 @@ if [ "$HOMESRV" = 1 ]; then
     echo '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 0'
     echo "[ \"\$(cat $DIR/.ref 2>/dev/null || true)\" = \"\$SHA\" ] && exit 0"
     echo "curl -fsSL \"https://raw.githubusercontent.com/$REPO/\$SHA/server/install.sh\" | REF=\"\$SHA\" TUNNEL=$TUNNEL WWW=${WWW:-0} bash -s -- $DOMAIN"
-  } > /usr/local/sbin/beemes-autoupdate
-  chmod 755 /usr/local/sbin/beemes-autoupdate
+  } > "$SBIN_DIR/beemes-autoupdate"
+  chmod 755 "$SBIN_DIR/beemes-autoupdate"
   printf '%s\n' '[Unit]' 'Description=Автообновление beemes с GitHub' 'After=network-online.target' 'Wants=network-online.target' '' \
-    '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/sbin/beemes-autoupdate' > "$SYSTEMD_DIR/beemes-autoupdate.service"
+    '[Service]' 'Type=oneshot' "ExecStart=$SBIN_DIR/beemes-autoupdate" > "$SYSTEMD_DIR/beemes-autoupdate.service"
   printf '%s\n' '[Unit]' 'Description=Раз в 15 минут — проверить обновления beemes' '' \
     '[Timer]' 'OnBootSec=5min' 'OnUnitActiveSec=15min' '' '[Install]' 'WantedBy=timers.target' > "$SYSTEMD_DIR/beemes-autoupdate.timer"
   # Какая версия стоит (по ней автообновление понимает, есть ли новое).
@@ -479,6 +484,118 @@ if [ "$HOMESRV" = 1 ]; then
   if [ -n "$REF" ]; then echo "$REF" > "$DIR/.ref"; fi
   systemctl daemon-reload
   systemctl enable --now beemes-autoupdate.timer >/dev/null 2>&1 || true
+
+  # ---------- Часовой пояс, выключение на ночь, резервные копии ----------
+  # Расписание и папка для копий запоминаются в home.conf: при автообновлении их указывать заново не нужно.
+  HOME_CONF="$DIR/home.conf"
+  conf_get() { { grep -m1 "^$1=" "$HOME_CONF" 2>/dev/null || true; } | cut -d= -f2-; }
+  if [ -n "${TIMEZONE:-}" ]; then
+    timedatectl set-timezone "$TIMEZONE" || fail "не получилось поставить часовой пояс $TIMEZONE (пример: Europe/Moscow)"
+  fi
+  if [ -z "${NIGHT+x}" ]; then NIGHT="$(conf_get NIGHT)"; fi
+  if [ -z "${BACKUP_DIR+x}" ]; then BACKUP_DIR="$(conf_get BACKUP_DIR)"; fi
+  NIGHT="$(printf '%s' "$NIGHT" | tr -d ' ')"
+  case "$NIGHT" in off|0|no) NIGHT="" ;; esac
+  case "$BACKUP_DIR" in off|0|no) BACKUP_DIR="" ;; esac
+  NIGHT_OFF=""; NIGHT_ON=""
+  if [ -n "$NIGHT" ]; then
+    [[ "$NIGHT" =~ ^([01]?[0-9]|2[0-3]):([0-5][0-9])-([01]?[0-9]|2[0-3]):([0-5][0-9])$ ]] \
+      || fail "расписание пишется так: NIGHT=22:00-06:00 (когда выключаться — когда включаться)"
+    NIGHT_OFF="$(printf '%02d:%s' "$((10#${BASH_REMATCH[1]}))" "${BASH_REMATCH[2]}")"
+    NIGHT_ON="$(printf '%02d:%s' "$((10#${BASH_REMATCH[3]}))" "${BASH_REMATCH[4]}")"
+    [ "$NIGHT_OFF" != "$NIGHT_ON" ] || fail "время выключения и включения совпадает"
+    NIGHT="$NIGHT_OFF-$NIGHT_ON"
+  fi
+  if [ -n "$BACKUP_DIR" ]; then
+    [[ "$BACKUP_DIR" =~ ^/[A-Za-z0-9/._-]+$ ]] || fail "BACKUP_DIR — полный путь к папке латинскими буквами, например /mnt/backup/beemes"
+    BACKUP_DIR="${BACKUP_DIR%/}"
+  fi
+  printf 'NIGHT=%s\nBACKUP_DIR=%s\n' "$NIGHT" "$BACKUP_DIR" > "$HOME_CONF"
+
+  # Резервная копия: beemes на минуту останавливается, база и файлы складываются в один архив.
+  BACKUP_SAME_DISK=0
+  if [ -n "$BACKUP_DIR" ]; then
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_DIR"
+    # Копии должны лежать на другом диске. Если сейчас так и есть — без этого диска копия писаться не будет
+    # (иначе при отвалившемся диске она молча заняла бы место на системном).
+    if [ "$(stat -c %d "$BACKUP_DIR")" = "$(stat -c %d "$DIR")" ]; then BACKUP_SAME_DISK=1; fi
+    {
+      echo '#!/usr/bin/env bash'
+      echo '# Резервная копия beemes: база и файлы (создано server/install.sh). NOSTART=1 — не запускать beemes после копии.'
+      echo 'set -euo pipefail'
+      echo "DIR=\"$DIR\"; DEST=\"$BACKUP_DIR\"; KEEP=${BACKUP_KEEP:-14}; OTHER_DISK=$((1 - BACKUP_SAME_DISK))"
+      cat <<'BKP'
+if [ "$OTHER_DISK" = 1 ] && { [ ! -d "$DEST" ] || [ "$(stat -c %d "$DEST")" = "$(stat -c %d "$DIR")" ]; }; then
+  echo "Диск для копий не подключён ($DEST) — копия не сделана." >&2
+  exit 1
+fi
+mkdir -p "$DEST"
+chmod 700 "$DEST"
+NAME="beemes-$(date +%Y-%m-%d_%H%M).tar.gz"
+WAS=0
+if systemctl is-active --quiet beemes; then WAS=1; systemctl stop beemes; fi
+restart() { if [ "$WAS" = 1 ] && [ "${NOSTART:-0}" != 1 ]; then systemctl start beemes; fi; }
+trap restart EXIT
+find "$DEST" -maxdepth 1 -name '.beemes-*.part' -delete
+tar --use-compress-program='gzip -1' --exclude='pb_data/backups' -cf "$DEST/.$NAME.part" -C "$DIR" pb_data server.env
+mv "$DEST/.$NAME.part" "$DEST/$NAME"
+# Храним только последние копии.
+ls -1t "$DEST"/beemes-*.tar.gz | tail -n +"$((KEEP + 1))" | while read -r OLD; do rm -f -- "$OLD"; done
+echo "Копия готова: $DEST/$NAME ($(du -h "$DEST/$NAME" | cut -f1))"
+BKP
+    } > "$SBIN_DIR/beemes-backup"
+    chmod 755 "$SBIN_DIR/beemes-backup"
+    printf '%s\n' '[Unit]' 'Description=Резервная копия beemes' '' \
+      '[Service]' 'Type=oneshot' "ExecStart=$SBIN_DIR/beemes-backup" > "$SYSTEMD_DIR/beemes-backup.service"
+    printf '%s\n' '[Unit]' 'Description=Каждую ночь — резервная копия beemes' '' \
+      '[Timer]' 'OnCalendar=*-*-* 04:00:00' '' '[Install]' 'WantedBy=timers.target' > "$SYSTEMD_DIR/beemes-backup.timer"
+  else
+    systemctl disable --now beemes-backup.timer >/dev/null 2>&1 || true
+    rm -f "$SBIN_DIR/beemes-backup" "$SYSTEMD_DIR/beemes-backup.service" "$SYSTEMD_DIR/beemes-backup.timer"
+  fi
+
+  # На ночь: копия, выключение, а утром компьютер включают его же часы (будильник RTC).
+  NIGHT_READY=0
+  if [ -n "$NIGHT" ]; then
+    command -v rtcwake >/dev/null 2>&1 || apt-get install -y -qq util-linux-extra >/dev/null 2>&1 || true
+    if command -v rtcwake >/dev/null 2>&1; then
+      NIGHT_READY=1
+      {
+        echo '#!/usr/bin/env bash'
+        echo '# На ночь: резервная копия, затем выключение с будильником на утро (создано server/install.sh).'
+        echo 'set -uo pipefail'
+        echo "WAKE=\"$NIGHT_ON\"; BACKUP=\"$SBIN_DIR/beemes-backup\""
+        cat <<'NGT'
+if [ -x "$BACKUP" ]; then NOSTART=1 "$BACKUP" || echo "Резервная копия не сделана." >&2; fi
+T="$(date -d "today $WAKE" +%s)"
+if [ "$T" -le "$(( $(date +%s) + 300 ))" ]; then T="$(date -d "tomorrow $WAKE" +%s)"; fi
+# Выключаемся и просим часы компьютера включить его утром. Не вышло — остаёмся работать.
+if ! rtcwake -m off -t "$T"; then
+  echo "Не получилось поставить будильник на включение — компьютер остаётся включённым." >&2
+  systemctl start beemes
+  exit 1
+fi
+NGT
+      } > "$SBIN_DIR/beemes-night"
+      chmod 755 "$SBIN_DIR/beemes-night"
+      printf '%s\n' '[Unit]' 'Description=beemes: копия и выключение на ночь' '' \
+        '[Service]' 'Type=oneshot' "ExecStart=$SBIN_DIR/beemes-night" > "$SYSTEMD_DIR/beemes-night.service"
+      printf '%s\n' '[Unit]' "Description=Каждый день в $NIGHT_OFF — выключение на ночь" '' \
+        '[Timer]' "OnCalendar=*-*-* $NIGHT_OFF:00" '' '[Install]' 'WantedBy=timers.target' > "$SYSTEMD_DIR/beemes-night.timer"
+    fi
+  fi
+  if [ "$NIGHT_READY" = 0 ]; then
+    systemctl disable --now beemes-night.timer >/dev/null 2>&1 || true
+    rm -f "$SBIN_DIR/beemes-night" "$SYSTEMD_DIR/beemes-night.service" "$SYSTEMD_DIR/beemes-night.timer"
+  fi
+  systemctl daemon-reload
+  if [ "$NIGHT_READY" = 1 ]; then systemctl enable --now beemes-night.timer >/dev/null 2>&1 || true; fi
+  if [ -n "$BACKUP_DIR" ]; then
+    # Копия делается перед выключением на ночь, а без расписания — в 04:00.
+    if [ "$NIGHT_READY" = 1 ]; then systemctl disable --now beemes-backup.timer >/dev/null 2>&1 || true
+    else systemctl enable --now beemes-backup.timer >/dev/null 2>&1 || true; fi
+  fi
 
   say "Готово! beemes работает на этом компьютере и будет запускаться сам."
   if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/health"; then echo "  Проверка: beemes отвечает (http://127.0.0.1:$PORT)."; else echo "  beemes пока не отвечает: journalctl -u beemes -n 50"; fi
@@ -494,6 +611,20 @@ if [ "$HOMESRV" = 1 ]; then
     echo "  Администратора создайте командой: $DIR/pocketbase superuser upsert ПОЧТА ПАРОЛЬ --dir $DIR/pb_data"
   fi
   echo "  Уведомления: в панели администратора откройте bm_settings и вставьте ключ сервисного аккаунта Firebase."
+  HOME_TZ="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+  if [ "$NIGHT_READY" = 1 ]; then
+    echo "  На ночь: выключение в $NIGHT_OFF, включение в $NIGHT_ON (часовой пояс ${HOME_TZ:-не определён}). Проверьте, что компьютер"
+    echo "  умеет включаться сам: sudo rtcwake -m off -s 180 — он выключится и через 3 минуты должен включиться."
+  elif [ -n "$NIGHT" ]; then
+    printf '\033[1;33m  Расписание на ночь не включено: на этом компьютере нет программы rtcwake.\033[0m\n'
+  fi
+  if [ -n "$BACKUP_DIR" ]; then
+    if [ "$NIGHT_READY" = 1 ]; then BACKUP_WHEN="перед выключением на ночь"; else BACKUP_WHEN="в 04:00"; fi
+    echo "  Копии: $BACKUP_DIR, каждый день $BACKUP_WHEN, хранятся последние ${BACKUP_KEEP:-14}. Сделать сейчас: sudo beemes-backup"
+    if [ "$BACKUP_SAME_DISK" = 1 ]; then
+      printf '\033[1;33m  Папка для копий — на том же диске, что и beemes: при поломке диска копии пропадут вместе с базой.\033[0m\n'
+    fi
+  fi
   exit 0
 fi
 
