@@ -23,7 +23,7 @@
 #     | sudo TUNNEL=1 bash -s -- beemes.ru ПОЧТА_АДМИНИСТРАТОРА ПАРОЛЬ_АДМИНИСТРАТОРА
 # Caddy и свой сервер звонков тогда не ставятся (звонки соединяются напрямую), брандмауэр закрывает всё
 # входящее (SSH — только из домашней сети), посетители приходят через туннель Cloudflare. Установка спросит
-# токен туннеля (Cloudflare → Zero Trust → Networks → Tunnels). Обновления сервер забирает с GitHub сам.
+# токен туннеля (Cloudflare → Networking → Tunnels). Обновления сервер забирает с GitHub сам.
 
 set -euo pipefail
 
@@ -259,22 +259,69 @@ if [ "$TUNNEL" = 1 ]; then
     apt-get update -qq
     apt-get install -y -qq cloudflared >/dev/null || fail "не получилось установить cloudflared"
   fi
-  if systemctl is-enabled --quiet cloudflared 2>/dev/null; then
-    echo "  Туннель уже подключён."
+  # Новые версии cloudflared тоже ставятся сами: старые Cloudflare со временем перестаёт пускать.
+  printf 'Unattended-Upgrade::Origins-Pattern { "origin=cloudflared"; };\n' > /etc/apt/apt.conf.d/51beemes-cloudflared
+  CF_BIN="$(command -v cloudflared)"
+  CF_DIR="${CF_DIR:-/etc/cloudflared}"
+  CF_TOKEN_FILE="$CF_DIR/token"
+  CF_UNIT="$SYSTEMD_DIR/cloudflared.service"
+  # Служба туннеля есть, и файл с токеном, на который она ссылается, на месте.
+  cf_unit_ok() {
+    [ -f "$CF_UNIT" ] || return 1
+    local tf
+    tf="$(grep -o -- '--token-file [^ ]*' "$CF_UNIT" | head -n1 | awk '{print $2}')"
+    [ -z "$tf" ] || [ -s "$tf" ]
+  }
+  cf_ready() { systemctl is-enabled --quiet cloudflared 2>/dev/null && cf_unit_ok; }
+  CF_TOKEN="${CF_TOKEN:-}"
+  CF_NEW=0
+  if [ -z "$CF_TOKEN" ] && cf_ready; then
+    echo "  Туннель уже настроен."
   else
-    CF_TOKEN="${CF_TOKEN:-}"
-    if [ -z "$CF_TOKEN" ] && [ -r /dev/tty ]; then
+    # Спрашиваем, только если есть живой терминал (у автообновления его нет).
+    if [ -z "$CF_TOKEN" ] && { : > /dev/tty; } 2>/dev/null; then
       printf '  Вставьте токен туннеля Cloudflare (на экране его не видно) и нажмите Enter:\n  ' > /dev/tty
       read -rs CF_TOKEN < /dev/tty || true
       echo > /dev/tty
     fi
     # Вставили всю команду «cloudflared service install …» — берём из неё только токен (последнее слово).
     CF_TOKEN="$(printf '%s' "$CF_TOKEN" | tr -s ' \t\r\n' ' ' | awk '{print $NF}')"
-    if [ -n "$CF_TOKEN" ]; then
-      cloudflared service install "$CF_TOKEN" >/dev/null 2>&1 || fail "туннель не подключился — проверьте токен (Cloudflare → Zero Trust → Networks → Tunnels)"
+    if [ -z "$CF_TOKEN" ]; then
+      echo "  Токен не введён — туннель не подключён. Запустите установку ещё раз, когда будет токен."
+    elif ! [[ "$CF_TOKEN" =~ ^eyJ[A-Za-z0-9+/=_-]{20,}$ ]]; then
+      echo "  Это не похоже на токен туннеля: он начинается с eyJ и написан одной длинной строкой."
+      echo "  Скопируйте строку «sudo cloudflared service install eyJ…» со страницы туннеля и запустите установку ещё раз."
+    else
+      # Своя служба вместо «cloudflared service install»: та ждёт подключения всего 15 секунд, а из России оно бывает
+      # дольше — тогда установка считается неудачной и токен стирается.
+      mkdir -p "$CF_DIR"
+      ( umask 077; printf '%s' "$CF_TOKEN" > "$CF_TOKEN_FILE" )
+      chmod 600 "$CF_TOKEN_FILE"
+      systemctl disable --now cloudflared-update.timer >/dev/null 2>&1 || true
+      rm -f "$SYSTEMD_DIR/cloudflared-update.timer" "$SYSTEMD_DIR/cloudflared-update.service"
+      printf '%s\n' '[Unit]' 'Description=Туннель Cloudflare' 'After=network-online.target' 'Wants=network-online.target' '' \
+        '[Service]' 'Type=notify' "ExecStart=$CF_BIN --no-autoupdate tunnel run --token-file $CF_TOKEN_FILE" '' \
+        '[Install]' 'WantedBy=multi-user.target' > "$CF_UNIT"
+      CF_NEW=1
+    fi
+  fi
+  unset CF_TOKEN
+  if cf_unit_ok; then
+    # Подключение из России бывает долгим, а при обрыве туннель должен подниматься сам — и так всегда.
+    mkdir -p "$CF_UNIT.d"
+    printf '%s\n' '[Service]' 'TimeoutStartSec=5min' 'Restart=always' 'RestartSec=10s' > "$CF_UNIT.d/10-beemes.conf"
+    systemctl daemon-reload
+    systemctl enable cloudflared >/dev/null 2>&1 || true
+    if [ "$CF_NEW" = 1 ] || ! systemctl is-active --quiet cloudflared; then systemctl restart --no-block cloudflared; fi
+    printf '  Жду подключения туннеля'
+    for _ in $(seq 1 60); do systemctl is-active --quiet cloudflared && break; printf '.'; sleep 2; done
+    echo
+    if systemctl is-active --quiet cloudflared; then
       echo "  Туннель подключён."
     else
-      echo "  Токен не введён — туннель не подключён. Запустите установку ещё раз, когда будет токен."
+      printf '\033[1;33m  Туннель пока не подключился, но будет пробовать сам. Проверить: systemctl status cloudflared\033[0m\n'
+      echo "  Последние строки журнала туннеля:"
+      journalctl -u cloudflared -n 12 --no-pager -o cat 2>/dev/null | sed 's/^/    /' || true
     fi
   fi
 
@@ -304,8 +351,8 @@ if [ "$TUNNEL" = 1 ]; then
 
   say "Готово! beemes работает на этом компьютере и будет запускаться сам."
   if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/health"; then echo "  Проверка: beemes отвечает (http://127.0.0.1:$PORT)."; else echo "  beemes пока не отвечает: journalctl -u beemes -n 50"; fi
-  echo "  Чтобы beemes открывался по адресу https://$DOMAIN_INPUT/ — в Cloudflare: Zero Trust → Networks → Tunnels →"
-  echo "  ваш туннель → Public Hostname → добавить $DOMAIN и www.$DOMAIN → Service: HTTP, localhost:$PORT."
+  echo "  Чтобы beemes открывался по адресу https://$DOMAIN_INPUT/ — в Cloudflare: Networking → Tunnels → ваш туннель →"
+  echo "  Routes → Add route → Published application: $DOMAIN и www.$DOMAIN → Service URL: http://localhost:$PORT"
   echo "  Панель администратора: https://$DOMAIN_INPUT/_/   ·   журнал: journalctl -u beemes -f   ·   туннель: systemctl status cloudflared"
   if [ -z "$ADMIN_EMAIL" ] && [ "$FRESH_INSTALL" = 1 ]; then
     echo "  Администратора создайте командой: $DIR/pocketbase superuser upsert ПОЧТА ПАРОЛЬ --dir $DIR/pb_data"
