@@ -28,7 +28,9 @@
 # Дополнительно для домашнего сервера (запоминаются, при повторном запуске указывать не нужно; off — отменить):
 #   TIMEZONE=Europe/Moscow      — часовой пояс компьютера;
 #   NIGHT=22:00-06:00           — каждый день выключаться в 22:00 и самому включаться в 06:00;
-#   BACKUP_DIR=/mnt/backup/beemes — каждый день класть копию базы и файлов в эту папку (на другом диске).
+#   BACKUP_DIR=/mnt/backup/beemes — каждый день класть копию базы и файлов в эту папку (на другом диске);
+#   BACKUP_DISK_ERASE=UUID      — один раз: стереть второй диск (тот, где раздел с этим UUID из lsblk -f), сделать из
+#                                 него диск для копий (/mnt/beemes-backup) и класть копии на него.
 # TUNNEL=cloudflare (или 1) — то же через туннель Cloudflare (бесплатно, но в России Cloudflare замедляют:
 # туннель с домашнего интернета может не подключиться, а сайт — не открываться у посетителей).
 
@@ -497,6 +499,45 @@ if [ "$HOMESRV" = 1 ]; then
   NIGHT="$(printf '%s' "$NIGHT" | tr -d ' ')"
   case "$NIGHT" in off|0|no) NIGHT="" ;; esac
   case "$BACKUP_DIR" in off|0|no) BACKUP_DIR="" ;; esac
+
+  # Диск для копий. BACKUP_DISK_ERASE=UUID — стереть диск, на котором сейчас раздел с этим UUID, и отдать его под
+  # копии. Системный диск и диск, который сейчас используется, не стираются.
+  BACKUP_MNT="${BACKUP_MNT:-/mnt/beemes-backup}"
+  FSTAB="${FSTAB:-/etc/fstab}"
+  if [ -n "${BACKUP_DISK_ERASE:-}" ]; then
+    say "Готовлю диск для резервных копий"
+    [[ "$BACKUP_DISK_ERASE" =~ ^[A-Za-z0-9-]{4,40}$ ]] || fail "BACKUP_DISK_ERASE — это UUID раздела из команды lsblk -f"
+    if [ -n "$(blkid -L beemes-backup 2>/dev/null || true)" ]; then
+      echo "  Диск для копий уже подготовлен — ничего не стираю."
+    else
+      BK_PART="$(blkid -U "$BACKUP_DISK_ERASE" 2>/dev/null || true)"
+      if [ -z "$BK_PART" ] || [ ! -b "$BK_PART" ]; then fail "не нашёл раздел с UUID $BACKUP_DISK_ERASE (проверьте по lsblk -f)"; fi
+      BK_PK="$(lsblk -no PKNAME "$BK_PART" 2>/dev/null | head -n1 || true)"
+      if [ -n "$BK_PK" ]; then BK_DISK="/dev/$BK_PK"; else BK_DISK="$BK_PART"; fi
+      if [ ! -b "$BK_DISK" ] || [ "$(lsblk -dno TYPE "$BK_DISK" 2>/dev/null || true)" != disk ]; then
+        fail "не получилось определить диск для раздела $BK_PART — ничего не стираю"
+      fi
+      ROOT_SRC="$(findmnt -no SOURCE / 2>/dev/null || true)"
+      ROOT_PK="$(lsblk -no PKNAME "$ROOT_SRC" 2>/dev/null | head -n1 || true)"
+      [ -n "$ROOT_PK" ] || fail "не получилось определить системный диск — на всякий случай ничего не стираю"
+      [ "$BK_DISK" != "/dev/$ROOT_PK" ] || fail "$BK_DISK — системный диск, его стирать нельзя"
+      if lsblk -nro MOUNTPOINTS "$BK_DISK" | grep -q .; then fail "диск $BK_DISK сейчас используется (подключён) — не стираю"; fi
+      echo "  Стираю диск $BK_DISK ($(lsblk -dno SIZE,MODEL "$BK_DISK" | tr -s ' ' | sed 's/^ //')) — всё на нём будет удалено."
+      # Сначала разделы, потом сам диск; затем одна файловая система Linux на весь диск.
+      lsblk -nrpo NAME "$BK_DISK" | sort -r | while read -r BK_DEV; do wipefs -a -q "$BK_DEV"; done
+      mkfs.ext4 -q -F -L beemes-backup "$BK_DISK"
+      partprobe "$BK_DISK" >/dev/null 2>&1 || blockdev --rereadpt "$BK_DISK" >/dev/null 2>&1 || true
+      udevadm settle >/dev/null 2>&1 || true
+    fi
+    mkdir -p "$BACKUP_MNT"
+    # nofail: без этого диска компьютер всё равно загрузится.
+    grep -q '^LABEL=beemes-backup[[:space:]]' "$FSTAB" 2>/dev/null \
+      || echo "LABEL=beemes-backup $BACKUP_MNT ext4 defaults,nofail,x-systemd.device-timeout=15s 0 2" >> "$FSTAB"
+    systemctl daemon-reload
+    mountpoint -q "$BACKUP_MNT" || mount "$BACKUP_MNT" || fail "диск для копий не подключился ($BACKUP_MNT)"
+    echo "  Диск для копий подключён: $BACKUP_MNT (свободно $(df -h --output=avail "$BACKUP_MNT" | tail -n1 | tr -d ' '))."
+    if [ -z "$BACKUP_DIR" ]; then BACKUP_DIR="$BACKUP_MNT/beemes"; fi
+  fi
   NIGHT_OFF=""; NIGHT_ON=""
   if [ -n "$NIGHT" ]; then
     [[ "$NIGHT" =~ ^([01]?[0-9]|2[0-3]):([0-5][0-9])-([01]?[0-9]|2[0-3]):([0-5][0-9])$ ]] \
