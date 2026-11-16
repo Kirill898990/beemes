@@ -29,6 +29,7 @@
 #   TIMEZONE=Europe/Moscow      — часовой пояс компьютера;
 #   NIGHT=22:00-06:00           — каждый день выключаться в 22:00 и самому включаться в 06:00;
 #   BACKUP_DIR=/mnt/backup/beemes — каждый день класть копию базы и файлов в эту папку (на другом диске);
+#   BACKUP_EVERY=15             — делать копию не каждый день, а раз в столько дней;
 #   BACKUP_DISK_ERASE=UUID      — один раз: стереть второй диск (тот, где раздел с этим UUID из lsblk -f), сделать из
 #                                 него диск для копий (/mnt/beemes-backup) и класть копии на него;
 #   SSH_TUNNEL=ssh              — управлять сервером по SSH не из домашней сети: туннель Tuna на порт, закреплённый
@@ -499,6 +500,9 @@ if [ "$HOMESRV" = 1 ]; then
   if [ -z "${NIGHT+x}" ]; then NIGHT="$(conf_get NIGHT)"; fi
   if [ -z "${BACKUP_DIR+x}" ]; then BACKUP_DIR="$(conf_get BACKUP_DIR)"; fi
   if [ -z "${SSH_TUNNEL+x}" ]; then SSH_TUNNEL="$(conf_get SSH_TUNNEL)"; fi
+  if [ -z "${BACKUP_EVERY+x}" ]; then BACKUP_EVERY="$(conf_get BACKUP_EVERY)"; fi
+  BACKUP_EVERY="${BACKUP_EVERY:-1}"
+  [[ "$BACKUP_EVERY" =~ ^[1-9][0-9]{0,2}$ ]] || fail "BACKUP_EVERY — раз во сколько дней делать копию, например BACKUP_EVERY=15"
   case "$SSH_TUNNEL" in off|0|no) SSH_TUNNEL="" ;; esac
   if [ -n "$SSH_TUNNEL" ]; then
     [[ "$SSH_TUNNEL" =~ ^[A-Za-z0-9_-]{1,40}$ ]] || fail "SSH_TUNNEL — имя или номер порта из my.tuna.am → Порты, например SSH_TUNNEL=ssh"
@@ -559,7 +563,7 @@ if [ "$HOMESRV" = 1 ]; then
     [[ "$BACKUP_DIR" =~ ^/[A-Za-z0-9/._-]+$ ]] || fail "BACKUP_DIR — полный путь к папке латинскими буквами, например /mnt/backup/beemes"
     BACKUP_DIR="${BACKUP_DIR%/}"
   fi
-  printf 'NIGHT=%s\nBACKUP_DIR=%s\nSSH_TUNNEL=%s\n' "$NIGHT" "$BACKUP_DIR" "$SSH_TUNNEL" > "$HOME_CONF"
+  printf 'NIGHT=%s\nBACKUP_DIR=%s\nSSH_TUNNEL=%s\nBACKUP_EVERY=%s\n' "$NIGHT" "$BACKUP_DIR" "$SSH_TUNNEL" "$BACKUP_EVERY" > "$HOME_CONF"
 
   # Резервная копия: beemes на минуту останавливается, база и файлы складываются в один архив.
   BACKUP_SAME_DISK=0
@@ -572,8 +576,9 @@ if [ "$HOMESRV" = 1 ]; then
     {
       echo '#!/usr/bin/env bash'
       echo '# Резервная копия beemes: база и файлы (создано server/install.sh). NOSTART=1 — не запускать beemes после копии.'
+      echo '# ONLY_IF_DUE=1 — по расписанию: пропустить, если последняя копия свежее, чем EVERY дней. Вручную копия делается всегда.'
       echo 'set -euo pipefail'
-      echo "DIR=\"$DIR\"; DEST=\"$BACKUP_DIR\"; KEEP=${BACKUP_KEEP:-14}; OTHER_DISK=$((1 - BACKUP_SAME_DISK))"
+      echo "DIR=\"$DIR\"; DEST=\"$BACKUP_DIR\"; KEEP=${BACKUP_KEEP:-14}; OTHER_DISK=$((1 - BACKUP_SAME_DISK)); EVERY=$BACKUP_EVERY"
       cat <<'BKP'
 if [ "$OTHER_DISK" = 1 ] && { [ ! -d "$DEST" ] || [ "$(stat -c %d "$DEST")" = "$(stat -c %d "$DIR")" ]; }; then
   echo "Диск для копий не подключён ($DEST) — копия не сделана." >&2
@@ -581,6 +586,14 @@ if [ "$OTHER_DISK" = 1 ] && { [ ! -d "$DEST" ] || [ "$(stat -c %d "$DEST")" = "$
 fi
 mkdir -p "$DEST"
 chmod 700 "$DEST"
+if [ "${ONLY_IF_DUE:-0}" = 1 ] && [ "$EVERY" -gt 1 ]; then
+  LAST="$(ls -1t "$DEST"/beemes-*.tar.gz 2>/dev/null | head -n1 || true)"
+  # Час запаса: копия, сделанная в 22:00, через ровно EVERY дней в 22:00 уже считается старой.
+  if [ -n "$LAST" ] && [ "$(( $(date +%s) - $(stat -c %Y "$LAST") ))" -lt "$(( EVERY * 86400 - 3600 ))" ]; then
+    echo "Копия пока не нужна: последняя сделана $(date -r "$LAST" '+%d.%m.%Y'), следующая — через $EVERY дн. после неё."
+    exit 0
+  fi
+fi
 NAME="beemes-$(date +%Y-%m-%d_%H%M).tar.gz"
 WAS=0
 if systemctl is-active --quiet beemes; then WAS=1; systemctl stop beemes; fi
@@ -596,7 +609,7 @@ BKP
     } > "$SBIN_DIR/beemes-backup"
     chmod 755 "$SBIN_DIR/beemes-backup"
     printf '%s\n' '[Unit]' 'Description=Резервная копия beemes' '' \
-      '[Service]' 'Type=oneshot' "ExecStart=$SBIN_DIR/beemes-backup" > "$SYSTEMD_DIR/beemes-backup.service"
+      '[Service]' 'Type=oneshot' 'Environment=ONLY_IF_DUE=1' "ExecStart=$SBIN_DIR/beemes-backup" > "$SYSTEMD_DIR/beemes-backup.service"
     printf '%s\n' '[Unit]' 'Description=Каждую ночь — резервная копия beemes' '' \
       '[Timer]' 'OnCalendar=*-*-* 04:00:00' '' '[Install]' 'WantedBy=timers.target' > "$SYSTEMD_DIR/beemes-backup.timer"
   else
@@ -616,7 +629,7 @@ BKP
         echo 'set -uo pipefail'
         echo "WAKE=\"$NIGHT_ON\"; BACKUP=\"$SBIN_DIR/beemes-backup\""
         cat <<'NGT'
-if [ -x "$BACKUP" ]; then NOSTART=1 "$BACKUP" || echo "Резервная копия не сделана." >&2; fi
+if [ -x "$BACKUP" ]; then NOSTART=1 ONLY_IF_DUE=1 "$BACKUP" || echo "Резервная копия не сделана." >&2; fi
 T="$(date -d "today $WAKE" +%s)"
 if [ "$T" -le "$(( $(date +%s) + 300 ))" ]; then T="$(date -d "tomorrow $WAKE" +%s)"; fi
 # Выключаемся и просим часы компьютера включить его утром. Не вышло — остаёмся работать.
@@ -717,7 +730,8 @@ NGT
   fi
   if [ -n "$BACKUP_DIR" ]; then
     if [ "$NIGHT_READY" = 1 ]; then BACKUP_WHEN="перед выключением на ночь"; else BACKUP_WHEN="в 04:00"; fi
-    echo "  Копии: $BACKUP_DIR, каждый день $BACKUP_WHEN, хранятся последние ${BACKUP_KEEP:-14}. Сделать сейчас: sudo beemes-backup"
+    if [ "$BACKUP_EVERY" = 1 ]; then BACKUP_HOW="каждый день"; else BACKUP_HOW="раз в $BACKUP_EVERY дн."; fi
+    echo "  Копии: $BACKUP_DIR, $BACKUP_HOW $BACKUP_WHEN, хранятся последние ${BACKUP_KEEP:-14}. Сделать сейчас: sudo beemes-backup"
     if [ "$BACKUP_SAME_DISK" = 1 ]; then
       printf '\033[1;33m  Папка для копий — на том же диске, что и beemes: при поломке диска копии пропадут вместе с базой.\033[0m\n'
     fi
