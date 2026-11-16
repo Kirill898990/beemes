@@ -710,8 +710,8 @@ NGT
   echo "  Уведомления: в панели администратора откройте bm_settings и вставьте ключ сервисного аккаунта Firebase."
   HOME_TZ="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
   if [ "$NIGHT_READY" = 1 ]; then
-    echo "  На ночь: выключение в $NIGHT_OFF, включение в $NIGHT_ON (часовой пояс ${HOME_TZ:-не определён}). Проверьте, что компьютер"
-    echo "  умеет включаться сам: sudo rtcwake -m off -s 180 — он выключится и через 3 минуты должен включиться."
+    echo "  На ночь: выключение в $NIGHT_OFF, включение в $NIGHT_ON (часовой пояс ${HOME_TZ:-не определён}). Компьютер должен уметь"
+    echo "  включаться сам: на многих платах для этого нужно включить в BIOS пробуждение по часам (RTC Alarm)."
   elif [ -n "$NIGHT" ]; then
     printf '\033[1;33m  Расписание на ночь не включено: на этом компьютере нет программы rtcwake.\033[0m\n'
   fi
@@ -723,9 +723,16 @@ NGT
     fi
   fi
   if [ "$SSH_READY" = 1 ]; then
-    echo "  SSH через Tuna включён, вход только по ключу. Номер порта смотрите в my.tuna.am → Порты (имя «$SSH_TUNNEL»):"
-    echo "  ssh -p НОМЕР_ПОРТА ${SUDO_USER:-ИМЯ}@ru.tuna.am   ·   журнал: journalctl -u beemes-tuna-ssh -n 20"
-    journalctl -u beemes-tuna-ssh -n 6 --no-pager -o cat 2>/dev/null | sed 's/^/    /' || true
+    # Адрес туннеля программа Tuna пишет в журнал: «Forwarding tcp://адрес:порт -> 127.0.0.1:22».
+    SSH_ADDR="$(journalctl -u beemes-tuna-ssh -n 40 --no-pager -o cat 2>/dev/null | grep -o 'tcp://[A-Za-z0-9.-]*:[0-9]*' | tail -n1 || true)"
+    SSH_ADDR="${SSH_ADDR#tcp://}"
+    echo "  SSH через Tuna включён, вход только по ключу. Подключаться со своего компьютера (не с сервера):"
+    if [ -n "$SSH_ADDR" ]; then
+      echo "  ssh -p ${SSH_ADDR##*:} ${SUDO_USER:-ИМЯ}@${SSH_ADDR%%:*}"
+    else
+      echo "  ssh -p ПОРТ ${SUDO_USER:-ИМЯ}@АДРЕС — адрес и порт смотрите в my.tuna.am → Порты (имя «$SSH_TUNNEL»)."
+      journalctl -u beemes-tuna-ssh -n 6 --no-pager -o cat 2>/dev/null | sed 's/^/    /' || true
+    fi
     if [ "$SSH_KEYS" = 0 ]; then
       printf '\033[1;33m  На сервере ещё нет ни одного ключа SSH — войти через туннель пока не получится. Добавьте ключ с вашего ПК.\033[0m\n'
     fi
