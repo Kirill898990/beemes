@@ -30,7 +30,9 @@
 #   NIGHT=22:00-06:00           — каждый день выключаться в 22:00 и самому включаться в 06:00;
 #   BACKUP_DIR=/mnt/backup/beemes — каждый день класть копию базы и файлов в эту папку (на другом диске);
 #   BACKUP_DISK_ERASE=UUID      — один раз: стереть второй диск (тот, где раздел с этим UUID из lsblk -f), сделать из
-#                                 него диск для копий (/mnt/beemes-backup) и класть копии на него.
+#                                 него диск для копий (/mnt/beemes-backup) и класть копии на него;
+#   SSH_TUNNEL=ssh              — управлять сервером по SSH не из домашней сети: туннель Tuna на порт, закреплённый
+#                                 под этим именем в my.tuna.am → Порты. Через туннель вход только по ключу.
 # TUNNEL=cloudflare (или 1) — то же через туннель Cloudflare (бесплатно, но в России Cloudflare замедляют:
 # туннель с домашнего интернета может не подключиться, а сайт — не открываться у посетителей).
 
@@ -496,6 +498,12 @@ if [ "$HOMESRV" = 1 ]; then
   fi
   if [ -z "${NIGHT+x}" ]; then NIGHT="$(conf_get NIGHT)"; fi
   if [ -z "${BACKUP_DIR+x}" ]; then BACKUP_DIR="$(conf_get BACKUP_DIR)"; fi
+  if [ -z "${SSH_TUNNEL+x}" ]; then SSH_TUNNEL="$(conf_get SSH_TUNNEL)"; fi
+  case "$SSH_TUNNEL" in off|0|no) SSH_TUNNEL="" ;; esac
+  if [ -n "$SSH_TUNNEL" ]; then
+    [[ "$SSH_TUNNEL" =~ ^[A-Za-z0-9_-]{1,40}$ ]] || fail "SSH_TUNNEL — имя или номер порта из my.tuna.am → Порты, например SSH_TUNNEL=ssh"
+    [ "$TUNNEL" = tuna ] || fail "SSH_TUNNEL работает только вместе с TUNNEL=tuna"
+  fi
   NIGHT="$(printf '%s' "$NIGHT" | tr -d ' ')"
   case "$NIGHT" in off|0|no) NIGHT="" ;; esac
   case "$BACKUP_DIR" in off|0|no) BACKUP_DIR="" ;; esac
@@ -551,7 +559,7 @@ if [ "$HOMESRV" = 1 ]; then
     [[ "$BACKUP_DIR" =~ ^/[A-Za-z0-9/._-]+$ ]] || fail "BACKUP_DIR — полный путь к папке латинскими буквами, например /mnt/backup/beemes"
     BACKUP_DIR="${BACKUP_DIR%/}"
   fi
-  printf 'NIGHT=%s\nBACKUP_DIR=%s\n' "$NIGHT" "$BACKUP_DIR" > "$HOME_CONF"
+  printf 'NIGHT=%s\nBACKUP_DIR=%s\nSSH_TUNNEL=%s\n' "$NIGHT" "$BACKUP_DIR" "$SSH_TUNNEL" > "$HOME_CONF"
 
   # Резервная копия: beemes на минуту останавливается, база и файлы складываются в один архив.
   BACKUP_SAME_DISK=0
@@ -638,6 +646,54 @@ NGT
     else systemctl enable --now beemes-backup.timer >/dev/null 2>&1 || true; fi
   fi
 
+  # ---------- SSH через туннель Tuna: управлять сервером не из домашней сети ----------
+  # Через туннель соединение приходит с этого же компьютера (127.0.0.1) — для таких входов принимается только ключ,
+  # пароль не подойдёт. В домашней сети всё остаётся как было.
+  SSHD_DROPIN="${SSHD_DIR:-/etc/ssh/sshd_config.d}/99-beemes-tunnel.conf"
+  SSH_READY=0
+  SSH_KEYS=0
+  if [ -n "$SSH_TUNNEL" ] && [ -s "$DIR/tuna.env" ]; then
+    mkdir -p "$(dirname "$SSHD_DROPIN")"
+    printf '%s\n' '# Вход через туннель Tuna (создано server/install.sh): только по ключу.' \
+      'Match Address 127.0.0.0/8,::1' '    PasswordAuthentication no' '    KbdInteractiveAuthentication no' \
+      '    PermitRootLogin no' 'Match all' > "$SSHD_DROPIN"
+    # Пока по SSH никто не входил, этой служебной папки может не быть — без неё проверка настроек не работает.
+    if [ -d /run ] && [ ! -d /run/sshd ]; then mkdir -p /run/sshd; chmod 0755 /run/sshd; fi
+    if sshd -t >/dev/null 2>&1; then
+      systemctl reload ssh >/dev/null 2>&1 || systemctl restart ssh >/dev/null 2>&1 || true
+      # Туннель включаем, только убедившись, что пароль через него действительно не принимается.
+      if sshd -T -C user=nobody,host=localhost,addr=127.0.0.1 2>/dev/null | grep -qix 'passwordauthentication no'; then SSH_READY=1; fi
+    else
+      rm -f "$SSHD_DROPIN"
+    fi
+  fi
+  if [ "$SSH_READY" = 1 ]; then
+    SSH_KEYS="$({ cat "${HOME_ROOT:-/home}"/*/.ssh/authorized_keys 2>/dev/null || true; } | grep -cE '^(ssh-|ecdsa-|sk-)' || true)"
+    printf '%s\n' '[Unit]' 'Description=Туннель Tuna: SSH' 'After=network-online.target' 'Wants=network-online.target' '' \
+      '[Service]' "EnvironmentFile=$DIR/tuna.env" 'Environment=HOME=/var/lib/beemes-tuna-ssh' \
+      "ExecStart=$TUNA_BIN tcp 22 --port=$SSH_TUNNEL" \
+      'Restart=always' 'RestartSec=15' 'DynamicUser=yes' 'StateDirectory=beemes-tuna-ssh' 'NoNewPrivileges=yes' 'ProtectHome=yes' \
+      'PrivateDevices=yes' 'ProtectKernelTunables=yes' 'ProtectControlGroups=yes' '' \
+      '[Install]' 'WantedBy=multi-user.target' > "$SYSTEMD_DIR/beemes-tuna-ssh.service.new"
+    SSH_NEW=0
+    if ! cmp -s "$SYSTEMD_DIR/beemes-tuna-ssh.service.new" "$SYSTEMD_DIR/beemes-tuna-ssh.service" 2>/dev/null; then SSH_NEW=1; fi
+    mv "$SYSTEMD_DIR/beemes-tuna-ssh.service.new" "$SYSTEMD_DIR/beemes-tuna-ssh.service"
+    systemctl daemon-reload
+    systemctl enable beemes-tuna-ssh >/dev/null 2>&1 || true
+    if [ "$SSH_NEW" = 1 ] || ! systemctl is-active --quiet beemes-tuna-ssh; then systemctl restart --no-block beemes-tuna-ssh; sleep 6; fi
+  else
+    # Туннель для SSH не нужен (или запретить пароль не получилось) — наружу SSH не выставляем.
+    if [ -f "$SYSTEMD_DIR/beemes-tuna-ssh.service" ]; then
+      systemctl disable --now beemes-tuna-ssh >/dev/null 2>&1 || true
+      rm -f "$SYSTEMD_DIR/beemes-tuna-ssh.service"
+      systemctl daemon-reload
+    fi
+    if [ -f "$SSHD_DROPIN" ] && [ -z "$SSH_TUNNEL" ]; then
+      rm -f "$SSHD_DROPIN"
+      systemctl reload ssh >/dev/null 2>&1 || true
+    fi
+  fi
+
   say "Готово! beemes работает на этом компьютере и будет запускаться сам."
   if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/health"; then echo "  Проверка: beemes отвечает (http://127.0.0.1:$PORT)."; else echo "  beemes пока не отвечает: journalctl -u beemes -n 50"; fi
   if [ "$TUNNEL" = cloudflare ]; then
@@ -665,6 +721,16 @@ NGT
     if [ "$BACKUP_SAME_DISK" = 1 ]; then
       printf '\033[1;33m  Папка для копий — на том же диске, что и beemes: при поломке диска копии пропадут вместе с базой.\033[0m\n'
     fi
+  fi
+  if [ "$SSH_READY" = 1 ]; then
+    echo "  SSH через Tuna включён, вход только по ключу. Номер порта смотрите в my.tuna.am → Порты (имя «$SSH_TUNNEL»):"
+    echo "  ssh -p НОМЕР_ПОРТА ${SUDO_USER:-ИМЯ}@ru.tuna.am   ·   журнал: journalctl -u beemes-tuna-ssh -n 20"
+    journalctl -u beemes-tuna-ssh -n 6 --no-pager -o cat 2>/dev/null | sed 's/^/    /' || true
+    if [ "$SSH_KEYS" = 0 ]; then
+      printf '\033[1;33m  На сервере ещё нет ни одного ключа SSH — войти через туннель пока не получится. Добавьте ключ с вашего ПК.\033[0m\n'
+    fi
+  elif [ -n "$SSH_TUNNEL" ]; then
+    printf '\033[1;33m  SSH через Tuna не включён: не получилось запретить вход по паролю через туннель (или нет ключа Tuna).\033[0m\n'
   fi
   exit 0
 fi
