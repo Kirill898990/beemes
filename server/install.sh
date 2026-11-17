@@ -627,8 +627,35 @@ BKP
         echo '#!/usr/bin/env bash'
         echo '# На ночь: резервная копия, затем выключение с будильником на утро (создано server/install.sh).'
         echo 'set -uo pipefail'
-        echo "WAKE=\"$NIGHT_ON\"; BACKUP=\"$SBIN_DIR/beemes-backup\""
+        echo "WAKE=\"$NIGHT_ON\"; OFF=\"$NIGHT_OFF\"; BACKUP=\"$SBIN_DIR/beemes-backup\""
         cat <<'NGT'
+# Часы компьютера при включении шли неверно (села батарейка на плате, компьютер обесточивали)? Тогда сбрасываются и
+# настройки BIOS — вместе с будильником, и утром компьютер сам не включится. Сверяем время, которое часы платы дали
+# при загрузке, с настоящим временем загрузки.
+CLOCK_WAS_WRONG=0
+RTC_AT_BOOT="$(journalctl -k -b 0 --no-pager -o cat 2>/dev/null | grep -o 'setting system clock to [^(]*([0-9]*)' | head -n1 | grep -o '([0-9]*)' | tr -d '()' || true)"
+if [ -n "$RTC_AT_BOOT" ]; then
+  BOOTED=$(( $(date +%s) - $(cut -d. -f1 /proc/uptime) ))
+  D=$(( BOOTED - RTC_AT_BOOT )); D=${D#-}
+  if [ "$D" -gt 3600 ]; then CLOCK_WAS_WRONG=1; fi
+fi
+# Запуск по расписанию (systemd сообщает таймер в TRIGGER_UNIT). Когда часы после включения переводятся вперёд,
+# systemd может запустить «ночь» сразу, днём, — выключаемся только в своё время. Вручную — когда попросили.
+if [ -n "${TRIGGER_UNIT:-}" ]; then
+  NOW_M=$(( 10#$(date +%H) * 60 + 10#$(date +%M) ))
+  OFF_M=$(( 10#${OFF%%:*} * 60 + 10#${OFF##*:} ))
+  if [ $(( (NOW_M - OFF_M + 1440) % 1440 )) -ge 60 ]; then
+    echo "Сейчас $(date +%H:%M), а выключение — в $OFF: часы, видимо, только что перевели. Остаюсь включённым."
+    exit 0
+  fi
+  if [ "$CLOCK_WAS_WRONG" = 1 ]; then
+    echo "При включении часы компьютера шли неверно (села батарейка на плате?) — будильник в BIOS мог сброситься, и утром" >&2
+    echo "компьютер не включится сам. На ночь не выключаюсь. Проверьте в BIOS время и будильник и перезагрузите компьютер." >&2
+    exit 0
+  fi
+elif [ "$CLOCK_WAS_WRONG" = 1 ]; then
+  echo "Внимание: при включении часы компьютера шли неверно — будильник в BIOS мог сброситься, утром может не включиться." >&2
+fi
 if [ -x "$BACKUP" ]; then NOSTART=1 ONLY_IF_DUE=1 "$BACKUP" || echo "Резервная копия не сделана." >&2; fi
 T="$(date -d "today $WAKE" +%s)"
 if [ "$T" -le "$(( $(date +%s) + 300 ))" ]; then T="$(date -d "tomorrow $WAKE" +%s)"; fi
